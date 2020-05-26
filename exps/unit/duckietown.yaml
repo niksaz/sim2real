@@ -1,0 +1,49 @@
+train:
+  log_iterations: 100 # How often do you want to log the training stats
+  image_display_iterations: 250 # How often do you want to display output images during training
+  image_save_iterations: 2500 # How often do you want to save output images during training
+  checkpoint_save_iterations: 5000 # How often do you want to save trained models
+  hyperparameters:
+    trainer: Trainer
+    lr: 0.0001
+    ll_direct_link_w: 100
+    kl_direct_link_w: 0.1
+    ll_cycle_link_w: 100
+    kl_cycle_link_w: 0.1
+    gan_w: 10
+    batch_size: 64
+    max_iterations: 50000
+    seed: 30
+    gen:
+      ch: 64
+      input_dim: 3
+      n_enc_front_blk: 3
+      n_enc_res_blk: 3
+      n_enc_shared_blk: 1
+      n_dec_shared_blk: 1
+      n_dec_res_blk: 3
+      n_dec_front_blk: 3
+      res_dropout_ratio: 0.5
+    dis:
+      ch: 64
+      input_dim: 3
+      n_layer: 4
+  datasets:
+    general:
+      datasets_dir: datasets/duckiebot
+      load_size_width: 64
+      load_size_height: 32
+      crop_size_width: 64
+      crop_size_height: 32
+    train_a:
+      dataset_name: trainA
+      filter: '*.png'
+    train_b:
+      dataset_name: trainB
+      filter: '*.png'
+    test_a:
+      dataset_name: testA
+      filter: '*.png'
+    test_b:
+      dataset_name: testB
+      filter: '*.png'
