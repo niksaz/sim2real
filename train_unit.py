@@ -16,19 +16,6 @@ import tqdm
 import data
 
 
-class NetConfig(object):
-  def __init__(self, config):
-    with open(config, 'r') as stream:
-      docs = yaml.load_all(stream)
-      for doc in docs:
-        for k, v in doc.items():
-          if k == 'train':
-            for k1, v1 in v.items():
-              cmd = 'self.' + k1 + '=' + repr(v1)
-              print(cmd)
-              exec(cmd)
-
-
 def parse_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('tag', type=str, help='The tag which will be included in the model output dir name.')
@@ -37,6 +24,12 @@ def parse_args():
   parser.add_argument('--test_only', action='store_true')  # whether to run the testing stage only
   parsed_args = parser.parse_args()
   return parsed_args
+
+
+def load_config(path):
+  with open(path, 'r') as stream:
+    doc = yaml.load(stream)
+    return doc['config']
 
 
 def Conv2DPadded(filters, kernel_size, strides, padding):
@@ -244,7 +237,7 @@ def _compute_kl(mu):
 
 class UNITModel(object):
   def __init__(self, config):
-    gen_hyperparameters = config.hyperparameters['gen']
+    gen_hyperparameters = config['hyperparameters']['gen']
     self.encoder_a = Encoder(gen_hyperparameters)
     self.encoder_b = Encoder(gen_hyperparameters)
     self.encoder_shared = EncoderShared(gen_hyperparameters)
@@ -252,7 +245,7 @@ class UNITModel(object):
     self.decoder_a = Decoder(gen_hyperparameters)
     self.decoder_b = Decoder(gen_hyperparameters)
 
-    dis_hyperparameters = config.hyperparameters['dis']
+    dis_hyperparameters = config['hyperparameters']['dis']
     self.dis_a = Discriminator(dis_hyperparameters)
     self.dis_b = Discriminator(dis_hyperparameters)
 
@@ -416,15 +409,17 @@ class Trainer(object):
     return G_images, G_loss_dict
 
 
-def create_datasets(config_datasets, batch_size):
+def create_datasets(config):
+  config_datasets = config['datasets']
   datasets_dir = config_datasets['general']['datasets_dir']
   load_size_width = config_datasets['general']['load_size_width']
   load_size_height = config_datasets['general']['load_size_height']
   crop_size_width = config_datasets['general']['crop_size_width']
   crop_size_height = config_datasets['general']['crop_size_height']
-
   load_size = [load_size_height, load_size_width]
   crop_size = [crop_size_height, crop_size_width]
+
+  batch_size = config['hyperparameters']['batch_size']
 
   config_train_a = config_datasets['train_a']
   config_train_b = config_datasets['train_b']
@@ -463,7 +458,7 @@ def create_datasets(config_datasets, batch_size):
 
 def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint):
   train_summary_writer = tf.summary.create_file_writer(summaries_dir)
-  max_iterations = config.hyperparameters['max_iterations']
+  max_iterations = config['hyperparameters']['max_iterations']
   dataset_iter = iter(ab_train_dataset)
   for iterations in tqdm.tqdm(range(max_iterations)):
     try:
@@ -477,14 +472,14 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
     G_images, G_loss_dict, D_loss_dict = trainer.train_step(images_a, images_b)
 
     # Logging ops
-    if (iterations + 1) % config.log_iterations == 0:
+    if (iterations + 1) % config['log_iterations'] == 0:
       with train_summary_writer.as_default():
         tf2lib.summary(D_loss_dict, step=iterations, name='discriminator')
         tf2lib.summary(G_loss_dict, step=iterations, name='generator')
     # Displaying ops
-    if (iterations + 1) % config.image_save_iterations == 0:
+    if (iterations + 1) % config['image_save_iterations'] == 0:
       img_filename = os.path.join(samples_dir, f'train_{iterations + 1}.jpg')
-    elif (iterations + 1) % config.image_display_iterations == 0:
+    elif (iterations + 1) % config['image_display_iterations'] == 0:
       img_filename = os.path.join(samples_dir, f'train.jpg')
     else:
       img_filename = None
@@ -492,24 +487,23 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
       img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
       imlib.imwrite(img, img_filename)
     # Checkpointing ops
-    if (iterations + 1) % config.checkpoint_save_iterations == 0 or iterations + 1 == max_iterations:
+    if (iterations + 1) % config['checkpoint_save_iterations'] == 0 or iterations + 1 == max_iterations:
       checkpoint.save(iterations + 1)
 
 
 def main():
   args = parse_args()
-  config = NetConfig(args.config_path)
+  config = load_config(args.config_path)
   print('args:', args)
+  print('config:', config)
 
-  tf.random.set_seed(config.hyperparameters['seed'])
-  np.random.seed(config.hyperparameters['seed'])
+  tf.random.set_seed(config['hyperparameters']['seed'])
+  np.random.seed(config['hyperparameters']['seed'])
+
+  ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length = create_datasets(config)
 
   unit_model = UNITModel(config)
-
-  ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length = create_datasets(
-      config.datasets, config.hyperparameters['batch_size'])
-
-  trainer = Trainer(unit_model, config.hyperparameters)
+  trainer = Trainer(unit_model, config['hyperparameters'])
 
   # Output directories
   output_dir_base = '/home/zerogerc/msazanovich/sim2real/duckietown/output'
