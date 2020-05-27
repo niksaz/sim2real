@@ -20,8 +20,10 @@ def parse_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('tag', type=str, help='The tag which will be included in the model output dir name.')
   parser.add_argument('--config_path', type=str, default='exps/unit/duckietown.yaml')
-  parser.add_argument('--test_checkpoinst_dir', type=str)  # the checkpoints to use for the testing
-  parser.add_argument('--test_only', action='store_true')  # whether to run the testing stage only
+  parser.add_argument('--output_dir_base', type=str, default='output')
+  parser.add_argument('--test_checkpoint_dir', type=str, default='')  # the checkpoint dir to use for the test stage
+  parser.add_argument('--skip_train', action='store_true')  # whether to skip the training stage
+  parser.add_argument('--skip_test', action='store_true')  # whether to skip the test stage
   parsed_args = parser.parse_args()
   return parsed_args
 
@@ -506,7 +508,7 @@ def main():
   trainer = Trainer(unit_model, config['hyperparameters'])
 
   # Output directories
-  output_dir_base = '/home/zerogerc/msazanovich/sim2real/duckietown/output'
+  output_dir_base = args.output_dir_base
   output_dir_name = f'unit-{args.tag}-{time.strftime("%Y%m%d%H%M%S")}'
   output_dir = os.path.join(output_dir_base, output_dir_name)
   os.makedirs(output_dir, exist_ok=False)
@@ -536,36 +538,39 @@ def main():
   except Exception as e:
     print(e)
 
-  if not args.test_only:
+  if not args.skip_train:
     train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint)
 
-  # Restore from the checkpoint
-  test_checkpoint_dir = args.test_checkpoinst_dir if args.test_checkpoinst_dir else checkpoints_dir
-  test_latest_checkpoint = tf.train.latest_checkpoint(test_checkpoint_dir)
-  print('The checkpoint for test is', test_latest_checkpoint)
+  if not args.skip_test:
+    # Restore from the test checkpoint
+    test_checkpoint_dir = args.test_checkpoinst_dir if args.test_checkpoint_dir else checkpoints_dir
+    test_latest_checkpoint = tf.train.latest_checkpoint(test_checkpoint_dir)
+    print('The checkpoint for test is', test_latest_checkpoint)
+    if not test_latest_checkpoint:
+      raise ValueError('No checkpoint is found for the test stage. Specify it in --test_checkpoint_dir.')
 
-  test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
-  test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
+    test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
+    test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
 
-  test_batches_to_save = 10
-  test_dataset_iter = iter(ab_test_dataset)
-  for iterations in tqdm.tqdm(range(ab_test_length)):
-    try:
-      images_a, images_b = next(test_dataset_iter)
-    except StopIteration:
-      break
+    test_batches_to_save = 10
+    test_dataset_iter = iter(ab_test_dataset)
+    for iterations in tqdm.tqdm(range(ab_test_length)):
+      try:
+        images_a, images_b = next(test_dataset_iter)
+      except StopIteration:
+        break
 
-    # Inference ops
-    x_aa, x_ba, x_ab, x_bb, shared = unit_model.encoder_decoder_ab_abab(images_a, images_b)
-    x_bab, shared_bab = unit_model.encoder_decoder_a_b(x_ba)
-    x_aba, shared_aba = unit_model.encoder_decoder_b_a(x_ab)
-    G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
+      # Inference ops
+      x_aa, x_ba, x_ab, x_bb, shared = unit_model.encoder_decoder_ab_abab(images_a, images_b)
+      x_bab, shared_bab = unit_model.encoder_decoder_a_b(x_ba)
+      x_aba, shared_aba = unit_model.encoder_decoder_b_a(x_ab)
+      G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
 
-    # Displaying ops
-    if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
-      img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
-      img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
-      imlib.imwrite(img, img_filename)
+      # Displaying ops
+      if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
+        img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
+        img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
+        imlib.imwrite(img, img_filename)
 
 
 if __name__ == '__main__':
