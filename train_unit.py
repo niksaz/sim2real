@@ -11,7 +11,7 @@ import numpy as np
 import pylib
 import imlib
 import tf2lib
-import tqdm as tqdm
+import tqdm
 
 import data
 
@@ -32,6 +32,7 @@ class NetConfig(object):
 def parse_args():
   parser = argparse.ArgumentParser()
   parser.add_argument('tag', type=str, help='The tag which will be included in the model output dir name.')
+  parser.add_argument('--config_path', type=str, default='exps/unit/duckietown.yaml')
   parser.add_argument('--test_checkpoinst_dir', type=str)  # the checkpoints to use for the testing
   parser.add_argument('--test_only', action='store_true')  # whether to run the testing stage only
   parsed_args = parser.parse_args()
@@ -220,60 +221,6 @@ class Discriminator(tf.keras.Model):
     return [out]
 
 
-config = NetConfig('exps/unit/duckietown.yaml')
-args = parse_args()
-#  '--test_checkpoinst_dir=/home/zerogerc/msazanovich/sim2real/duckietown/output/unit-epochs-50-20200520003002/checkpoints'
-# '--test_only'
-print(args)
-
-tf.random.set_seed(config.hyperparameters['seed'])
-np.random.seed(config.hyperparameters['seed'])
-
-gen_hyperparameters = config.hyperparameters['gen']
-encoder_a = Encoder(gen_hyperparameters)
-encoder_b = Encoder(gen_hyperparameters)
-encoder_shared = EncoderShared(gen_hyperparameters)
-decoder_shared = DecoderShared(gen_hyperparameters)
-decoder_a = Decoder(gen_hyperparameters)
-decoder_b = Decoder(gen_hyperparameters)
-
-dis_hyperparameters = config.hyperparameters['dis']
-dis_a = Discriminator(dis_hyperparameters)
-dis_b = Discriminator(dis_hyperparameters)
-
-
-@tf.function
-def encoder_decoder_ab_abab(x_a, x_b):
-  encoded_a = encoder_a(x_a)
-  encoded_b = encoder_b(x_b)
-  encoded_ab = tf.concat((encoded_a, encoded_b), axis=0)
-  encoded_shared = encoder_shared(encoded_ab)
-  decoded_shared = decoder_shared(encoded_shared)
-  decoded_a = decoder_a(decoded_shared)
-  decoded_b = decoder_b(decoded_shared)
-  x_aa, x_ba = tf.split(decoded_a, num_or_size_splits=2, axis=0)
-  x_ab, x_bb = tf.split(decoded_b, num_or_size_splits=2, axis=0)
-  return x_aa, x_ba, x_ab, x_bb, encoded_shared
-
-
-@tf.function
-def encoder_decoder_a_b(x_a):
-  encoded_a = encoder_a(x_a)
-  encoded_shared = encoder_shared(encoded_a)
-  decoded_shared = decoder_shared(encoded_shared)
-  decoded_b = decoder_b(decoded_shared)
-  return decoded_b, encoded_shared
-
-
-@tf.function
-def encoder_decoder_b_a(x_b):
-  encoded_b = encoder_b(x_b)
-  encoded_shared = encoder_shared(encoded_b)
-  decoded_shared = decoder_shared(encoded_shared)
-  decoded_a = decoder_a(decoded_shared)
-  return decoded_a, encoded_shared
-
-
 @tf.function
 def _compute_true_acc(predictions):
   predictions_true = tf.greater(predictions, 0.5)
@@ -295,9 +242,54 @@ def _compute_kl(mu):
   return encoding_loss
 
 
+class UNITModel(object):
+  def __init__(self, config):
+    gen_hyperparameters = config.hyperparameters['gen']
+    self.encoder_a = Encoder(gen_hyperparameters)
+    self.encoder_b = Encoder(gen_hyperparameters)
+    self.encoder_shared = EncoderShared(gen_hyperparameters)
+    self.decoder_shared = DecoderShared(gen_hyperparameters)
+    self.decoder_a = Decoder(gen_hyperparameters)
+    self.decoder_b = Decoder(gen_hyperparameters)
+
+    dis_hyperparameters = config.hyperparameters['dis']
+    self.dis_a = Discriminator(dis_hyperparameters)
+    self.dis_b = Discriminator(dis_hyperparameters)
+
+  @tf.function
+  def encoder_decoder_ab_abab(self, x_a, x_b):
+    encoded_a = self.encoder_a(x_a)
+    encoded_b = self.encoder_b(x_b)
+    encoded_ab = tf.concat((encoded_a, encoded_b), axis=0)
+    encoded_shared = self.encoder_shared(encoded_ab)
+    decoded_shared = self.decoder_shared(encoded_shared)
+    decoded_a = self.decoder_a(decoded_shared)
+    decoded_b = self.decoder_b(decoded_shared)
+    x_aa, x_ba = tf.split(decoded_a, num_or_size_splits=2, axis=0)
+    x_ab, x_bb = tf.split(decoded_b, num_or_size_splits=2, axis=0)
+    return x_aa, x_ba, x_ab, x_bb, encoded_shared
+
+  @tf.function
+  def encoder_decoder_a_b(self, x_a):
+    encoded_a = self.encoder_a(x_a)
+    encoded_shared = self.encoder_shared(encoded_a)
+    decoded_shared = self.decoder_shared(encoded_shared)
+    decoded_b = self.decoder_b(decoded_shared)
+    return decoded_b, encoded_shared
+
+  @tf.function
+  def encoder_decoder_b_a(self, x_b):
+    encoded_b = self.encoder_b(x_b)
+    encoded_shared = self.encoder_shared(encoded_b)
+    decoded_shared = self.decoder_shared(encoded_shared)
+    decoded_a = self.decoder_a(decoded_shared)
+    return decoded_a, encoded_shared
+
+
 class Trainer(object):
-  def __init__(self, hyperparameters):
+  def __init__(self, model, hyperparameters):
     super(Trainer, self).__init__()
+    self.model = model
     self.hyperparameters = hyperparameters
     lr = self.hyperparameters['lr']
     self.enc_dec_opt = tf.keras.optimizers.Adam(learning_rate=lr, beta_1=0.5, beta_2=0.999, decay=0.0001)
@@ -315,11 +307,11 @@ class Trainer(object):
   @tf.function
   def dis_update(self, images_a, images_b):
     with tf.GradientTape() as t:
-      x_aa, x_ba, x_ab, x_bb, shared = encoder_decoder_ab_abab(images_a, images_b)
+      x_aa, x_ba, x_ab, x_bb, shared = self.model.encoder_decoder_ab_abab(images_a, images_b)
       data_a = tf.concat((images_a, x_ba), axis=0)
       data_b = tf.concat((images_b, x_ab), axis=0)
-      res_a = dis_a(data_a)
-      res_b = dis_b(data_b)
+      res_a = self.model.dis_a(data_a)
+      res_b = self.model.dis_b(data_b)
       for it, (this_a, this_b) in enumerate(zip(res_a, res_b)):
         out_a = tf.keras.activations.sigmoid(this_a)
         out_b = tf.keras.activations.sigmoid(this_b)
@@ -342,7 +334,8 @@ class Trainer(object):
       loss = self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
 
     variables = []
-    for model in [dis_a, dis_b]:
+    dis_models = [self.model.dis_a, self.model.dis_b]
+    for model in dis_models:
       variables.extend(model.trainable_variables)
     grads = t.gradient(loss, variables)
     self.discrim_opt.apply_gradients(zip(grads, variables))
@@ -364,11 +357,11 @@ class Trainer(object):
   @tf.function
   def enc_dec_update(self, images_a, images_b):
     with tf.GradientTape() as t:
-      x_aa, x_ba, x_ab, x_bb, shared = encoder_decoder_ab_abab(images_a, images_b)
-      x_bab, shared_bab = encoder_decoder_a_b(x_ba)
-      x_aba, shared_aba = encoder_decoder_b_a(x_ab)
-      outs_a = dis_a(x_ba)
-      outs_b = dis_b(x_ab)
+      x_aa, x_ba, x_ab, x_bb, shared = self.model.encoder_decoder_ab_abab(images_a, images_b)
+      x_bab, shared_bab = self.model.encoder_decoder_a_b(x_ba)
+      x_aba, shared_aba = self.model.encoder_decoder_b_a(x_ab)
+      outs_a = self.model.dis_a(x_ba)
+      outs_b = self.model.dis_b(x_ab)
       for it, (out_a, out_b) in enumerate(zip(outs_a, outs_b)):
         outputs_a = tf.keras.activations.sigmoid(out_a)
         outputs_b = tf.keras.activations.sigmoid(out_b)
@@ -398,8 +391,11 @@ class Trainer(object):
           + self.hyperparameters['kl_cycle_link_w'] * (enc_bab_loss + enc_aba_loss))
 
     variables = []
-    for model in [
-        encoder_a, encoder_b, encoder_shared, decoder_shared, decoder_a, decoder_b]:
+    gen_models = [
+        self.model.encoder_a, self.model.encoder_b,
+        self.model.encoder_shared, self.model.decoder_shared,
+        self.model.decoder_a, self.model.decoder_b]
+    for model in gen_models:
       variables.extend(model.trainable_variables)
     grads = t.gradient(loss, variables)
     self.enc_dec_opt.apply_gradients(zip(grads, variables))
@@ -465,46 +461,8 @@ def create_datasets(config_datasets, batch_size):
   return ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length
 
 
-ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length = create_datasets(
-    config.datasets, config.hyperparameters['batch_size'])
-
-trainer = Trainer(config.hyperparameters)
-
-# Output directories
-output_dir_base = '/home/zerogerc/msazanovich/sim2real/duckietown/output'
-output_dir_name = f'unit-{args.tag}-{time.strftime("%Y%m%d%H%M%S")}'
-output_dir = os.path.join(output_dir_base, output_dir_name)
-os.makedirs(output_dir, exist_ok=False)
-
-samples_dir = os.path.join(output_dir, 'samples')
-summaries_dir = os.path.join(output_dir, 'summaries')
-os.makedirs(samples_dir, exist_ok=False)
-os.makedirs(summaries_dir, exist_ok=False)
-
-# Checkpointing setup
-checkpoints_dir = os.path.join(output_dir, 'checkpoints')
-checkpoint_dict = {
-    'encoder_a': encoder_a,
-    'encoder_b': encoder_b,
-    'encoder_shared': encoder_shared,
-    'decoder_shared': decoder_shared,
-    'decoder_a': decoder_a,
-    'decoder_b': decoder_b,
-    'dis_a': dis_a,
-    'dis_b': dis_b,
-    'enc_dec_opt': trainer.enc_dec_opt,
-    'discrim_opt': trainer.discrim_opt,
-}
-checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=5)
-try:  # Restore checkpoint
-  checkpoint.restore().assert_existing_objects_matched()
-except Exception as e:
-  print(e)
-
-train_summary_writer = tf.summary.create_file_writer(summaries_dir)
-
-
-def train():
+def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint):
+  train_summary_writer = tf.summary.create_file_writer(summaries_dir)
   max_iterations = config.hyperparameters['max_iterations']
   dataset_iter = iter(ab_train_dataset)
   for iterations in tqdm.tqdm(range(max_iterations)):
@@ -538,34 +496,83 @@ def train():
       checkpoint.save(iterations + 1)
 
 
-if not args.test_only:
-  train()
+def main():
+  args = parse_args()
+  config = NetConfig(args.config_path)
+  print('args:', args)
 
-# Restore from the checkpoint
-test_checkpoinst_dir = args.test_checkpoinst_dir if args.test_checkpoinst_dir else checkpoints_dir
-test_latest_checkpoint = tf.train.latest_checkpoint(test_checkpoinst_dir)
-print(test_latest_checkpoint)
+  tf.random.set_seed(config.hyperparameters['seed'])
+  np.random.seed(config.hyperparameters['seed'])
 
-test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
-test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
+  unit_model = UNITModel(config)
 
-TEST_BATCHES_TO_SAVE = 10
+  ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length = create_datasets(
+      config.datasets, config.hyperparameters['batch_size'])
 
-test_dataset_iter = iter(ab_test_dataset)
-for iterations in tqdm.tqdm(range(ab_test_length)):
-  try:
-    images_a, images_b = next(test_dataset_iter)
-  except StopIteration:
-    break
+  trainer = Trainer(unit_model, config.hyperparameters)
 
-  # Inference ops
-  x_aa, x_ba, x_ab, x_bb, shared = encoder_decoder_ab_abab(images_a, images_b)
-  x_bab, shared_bab = encoder_decoder_a_b(x_ba)
-  x_aba, shared_aba = encoder_decoder_b_a(x_ab)
-  G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
+  # Output directories
+  output_dir_base = '/home/zerogerc/msazanovich/sim2real/duckietown/output'
+  output_dir_name = f'unit-{args.tag}-{time.strftime("%Y%m%d%H%M%S")}'
+  output_dir = os.path.join(output_dir_base, output_dir_name)
+  os.makedirs(output_dir, exist_ok=False)
 
-  # Displaying ops
-  if (iterations + 1) % (ab_test_length // TEST_BATCHES_TO_SAVE) == 0:
-    img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
-    img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
-    imlib.imwrite(img, img_filename)
+  samples_dir = os.path.join(output_dir, 'samples')
+  summaries_dir = os.path.join(output_dir, 'summaries')
+  os.makedirs(samples_dir, exist_ok=False)
+  os.makedirs(summaries_dir, exist_ok=False)
+
+  # Checkpointing setup
+  checkpoints_dir = os.path.join(output_dir, 'checkpoints')
+  checkpoint_dict = {
+      'encoder_a': unit_model.encoder_a,
+      'encoder_b': unit_model.encoder_b,
+      'encoder_shared': unit_model.encoder_shared,
+      'decoder_shared': unit_model.decoder_shared,
+      'decoder_a': unit_model.decoder_a,
+      'decoder_b': unit_model.decoder_b,
+      'dis_a': unit_model.dis_a,
+      'dis_b': unit_model.dis_b,
+      'enc_dec_opt': trainer.enc_dec_opt,
+      'discrim_opt': trainer.discrim_opt,
+  }
+  checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=5)
+  try:  # Restore checkpoint
+    checkpoint.restore().assert_existing_objects_matched()
+  except Exception as e:
+    print(e)
+
+  if not args.test_only:
+    train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint)
+
+  # Restore from the checkpoint
+  test_checkpoint_dir = args.test_checkpoinst_dir if args.test_checkpoinst_dir else checkpoints_dir
+  test_latest_checkpoint = tf.train.latest_checkpoint(test_checkpoint_dir)
+  print('The checkpoint for test is', test_latest_checkpoint)
+
+  test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
+  test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
+
+  test_batches_to_save = 10
+  test_dataset_iter = iter(ab_test_dataset)
+  for iterations in tqdm.tqdm(range(ab_test_length)):
+    try:
+      images_a, images_b = next(test_dataset_iter)
+    except StopIteration:
+      break
+
+    # Inference ops
+    x_aa, x_ba, x_ab, x_bb, shared = unit_model.encoder_decoder_ab_abab(images_a, images_b)
+    x_bab, shared_bab = unit_model.encoder_decoder_a_b(x_ba)
+    x_aba, shared_aba = unit_model.encoder_decoder_b_a(x_ab)
+    G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
+
+    # Displaying ops
+    if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
+      img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
+      img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
+      imlib.imwrite(img, img_filename)
+
+
+if __name__ == '__main__':
+  main()
