@@ -35,18 +35,20 @@ def load_config(path):
 
 
 def Conv2DPadded(filters, kernel_size, strides, padding):
-  layers = []
-  layers.append(
-      tf.keras.layers.Conv2D(filters=filters, kernel_size=kernel_size, strides=strides, padding='same'))
-  return tf.keras.Sequential(layers=layers)
+  return tf.keras.layers.Conv2D(
+      filters=filters,
+      kernel_size=kernel_size,
+      strides=strides,
+      padding=[[0, 0], [padding, padding], [padding, padding], [0, 0]])
 
 
-def Conv2DTransposePadded(filters, kernel_size, strides, padding, output_padding):
-  layers = []
-  layers.append(
-      tf.keras.layers.Conv2DTranspose(
-          filters=filters, kernel_size=kernel_size, strides=strides, padding='same', output_padding=output_padding))
-  return tf.keras.Sequential(layers=layers)
+def Conv2DTransposePaddedSame(filters, kernel_size, strides, padding, output_padding):
+  if padding != kernel_size // 2:
+    raise NotImplementedError(
+        f'padding {padding} and kernel_size {kernel_size} are not supported by Conv2DTranspose.')
+  assert kernel_size // 2 == padding
+  return tf.keras.layers.Conv2DTranspose(
+          filters=filters, kernel_size=kernel_size, strides=strides, padding='same', output_padding=output_padding)
 
 
 def LeakyReLUConv2D(input_filters, output_filters, kernel_size, strides, padding):
@@ -58,7 +60,7 @@ def LeakyReLUConv2D(input_filters, output_filters, kernel_size, strides, padding
 
 def LeakyReLUConv2DTranspose(input_filters, output_filters, kernel_size, strides, padding, output_padding):
   layers = []
-  layers.append(Conv2DTransposePadded(output_filters, kernel_size, strides, padding, output_padding))
+  layers.append(Conv2DTransposePaddedSame(output_filters, kernel_size, strides, padding, output_padding))
   layers.append(tf.keras.layers.LeakyReLU())  # TODO(sazanovich): alpha = 0.3 while in torch it is 0.01
   return tf.keras.Sequential(layers=layers)
 
@@ -111,8 +113,8 @@ class Encoder(tf.keras.Model):
       layers += [INSResBlock(tch, tch, dropout=res_dropout_ratio)]
     self.model = tf.keras.Sequential(layers)
 
-  def __call__(self, inputs):
-    return self.model(inputs)
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
 
 
 class EncoderShared(tf.keras.Model):
@@ -136,8 +138,8 @@ class EncoderShared(tf.keras.Model):
     layers += [tf.keras.layers.GaussianNoise(stddev=1.0)]
     self.model = tf.keras.Sequential(layers)
 
-  def __call__(self, inputs):
-    return self.model(inputs)
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
 
 
 class DecoderShared(tf.keras.Model):
@@ -160,8 +162,8 @@ class DecoderShared(tf.keras.Model):
       layers += [INSResBlock(tch, tch, dropout=res_dropout_ratio)]
     self.model = tf.keras.Sequential(layers)
 
-  def __call__(self, inputs):
-    return self.model(inputs)
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
 
 
 class Decoder(tf.keras.Model):
@@ -186,12 +188,12 @@ class Decoder(tf.keras.Model):
     for i in range(0, n_dec_front_blk - 1):
       layers += [LeakyReLUConv2DTranspose(tch, tch // 2, kernel_size=3, strides=2, padding=1, output_padding=1)]
       tch = tch // 2
-    layers += [Conv2DTransposePadded(filters=input_dim, kernel_size=1, strides=1, padding=0, output_padding=0)]
+    layers += [Conv2DTransposePaddedSame(filters=input_dim, kernel_size=1, strides=1, padding=0, output_padding=0)]
     layers += [tf.keras.layers.Activation(tf.keras.activations.tanh)]
     self.model = tf.keras.Sequential(layers)
 
-  def __call__(self, inputs):
-    return self.model(inputs)
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
 
 
 class Discriminator(tf.keras.Model):
@@ -210,8 +212,8 @@ class Discriminator(tf.keras.Model):
     model += [tf.keras.layers.Conv2D(1, kernel_size=1, strides=1)]
     self.model = tf.keras.Sequential(layers=model)
 
-  def __call__(self, inputs):
-    out = self.model(inputs)
+  def __call__(self, inputs, **kwargs):
+    out = self.model(inputs, **kwargs)
     out = tf.reshape(out, [-1])
     return [out]
 
