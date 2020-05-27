@@ -5,7 +5,7 @@ import tensorflow as tf
 import tf2lib as tl
 
 import data
-import module
+from cyclegan import module
 
 # ==============================================================================
 # =                                   param                                    =

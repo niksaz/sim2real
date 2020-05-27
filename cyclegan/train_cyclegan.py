@@ -13,7 +13,7 @@ import tf2gan
 import tqdm
 
 import data
-import module
+from cyclegan import module
 
 
 def parse_args():
