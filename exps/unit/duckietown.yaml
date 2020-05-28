@@ -12,7 +12,7 @@ config:
     kl_cycle_link_w: 0.1
     gan_w: 10
     batch_size: 64
-    max_iterations: 1000
+    max_iterations: 10000
     seed: 30
     gen:
       ch: 64
@@ -28,22 +28,26 @@ config:
       ch: 64
       input_dim: 3
       n_layer: 4
+    control:
+      n_layer: 2
   datasets:
     general:
       datasets_dir: datasets/duckiebot
-      load_size_width: 64
-      load_size_height: 32
-      crop_size_width: 64
-      crop_size_height: 32
+      load_size: [32, 64] # height, width
+      crop_size: [32, 64] # height, width
     train_a:
       dataset_name: trainA
       filter: '*.png'
+      filter_actions: '*.npy'
     train_b:
       dataset_name: trainB
       filter: '*.png'
+      filter_actions: '*.npy'
     test_a:
       dataset_name: testA
       filter: '*.png'
+      filter_actions: '*.npy'
     test_b:
       dataset_name: testB
       filter: '*.png'
+      filter_actions: '*.npy'
