@@ -3,24 +3,28 @@ import tensorflow as tf
 import tf2lib as tl
 
 
-def make_dataset(img_paths, batch_size, load_size, crop_size, training, drop_remainder=True, shuffle=True, repeat=1):
-    if training:
-        @tf.function
-        def _map_fn(img):  # preprocessing
-            img = tf.image.random_flip_left_right(img)
-            img = tf.image.resize(img, load_size)
-            img = tf.image.random_crop(img, crop_size + [tf.shape(img)[-1]])
-            img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
-            img = img * 2 - 1
-            return img
-    else:
-        @tf.function
-        def _map_fn(img):  # preprocessing
-            img = tf.image.resize(img, crop_size)  # or img = tf.image.resize(img, load_size); img = tl.center_crop(img, crop_size)
-            img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
-            img = img * 2 - 1
-            return img
+def img_preprocessing_fn(load_size, crop_size, training):
+  if training:
+    @tf.function
+    def _map_fn(img):  # preprocessing
+      # img = tf.image.random_flip_left_right(img)
+      img = tf.image.resize(img, load_size)
+      img = tf.image.random_crop(img, crop_size + [tf.shape(img)[-1]])
+      img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
+      img = img * 2 - 1  # or img = tf.image.rgb_to_yuv(img)
+      return img
+  else:
+    @tf.function
+    def _map_fn(img):  # preprocessing
+      img = tf.image.resize(img, crop_size)  # or img = tf.image.resize(img, load_size); img = tl.center_crop(img, crop_size)
+      img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
+      img = img * 2 - 1  # or img = tf.image.rgb_to_yuv(img)
+      return img
+  return _map_fn
 
+
+def make_dataset(img_paths, batch_size, load_size, crop_size, training, drop_remainder=True, shuffle=True, repeat=1):
+    _map_fn = img_preprocessing_fn(load_size, crop_size, training)
     return tl.disk_image_batch_dataset(img_paths,
                                        batch_size,
                                        drop_remainder=drop_remainder,

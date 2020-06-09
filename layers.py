@@ -4,6 +4,17 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 
+def get_norm_layer(norm):
+  if norm == 'none':
+    return lambda x: x
+  elif norm == 'batch_norm':
+    return tf.keras.layers.BatchNormalization()
+  elif norm == 'instance_norm':
+    return tfa.layers.InstanceNormalization()
+  elif norm == 'layer_norm':
+    return tf.keras.layers.LayerNormalization()
+
+
 def Conv2DPadded(filters, kernel_size, strides, padding):
   return tf.keras.layers.Conv2D(
       filters=filters,
@@ -21,17 +32,19 @@ def Conv2DTransposePaddedSame(filters, kernel_size, strides, padding, output_pad
           filters=filters, kernel_size=kernel_size, strides=strides, padding='same', output_padding=output_padding)
 
 
-def LeakyReLUConv2D(input_filters, output_filters, kernel_size, strides, padding):
+def NormReLUConv2DBlock(input_filters, output_filters, kernel_size, strides, padding):
   layers = []
+  layers.append(get_norm_layer('batch_norm'))
+  layers.append(tf.keras.layers.ReLU())
   layers.append(Conv2DPadded(output_filters, kernel_size, strides, padding))
-  layers.append(tf.keras.layers.LeakyReLU())  # TODO(sazanovich): alpha = 0.3 while in torch it is 0.01
   return tf.keras.Sequential(layers=layers)
 
 
-def LeakyReLUConv2DTranspose(input_filters, output_filters, kernel_size, strides, padding, output_padding):
+def NormReLUConv2DTransposeBlock(input_filters, output_filters, kernel_size, strides, padding, output_padding):
   layers = []
+  layers.append(get_norm_layer('batch_norm'))
+  layers.append(tf.keras.layers.ReLU())
   layers.append(Conv2DTransposePaddedSame(output_filters, kernel_size, strides, padding, output_padding))
-  layers.append(tf.keras.layers.LeakyReLU())  # TODO(sazanovich): alpha = 0.3 while in torch it is 0.01
   return tf.keras.Sequential(layers=layers)
 
 
@@ -39,13 +52,14 @@ def Conv3x3(inplanes, outplanes, strides=1):
   return Conv2DPadded(outplanes, kernel_size=3, strides=strides, padding=1)
 
 
-def INSResBlock(inplanes, planes, strides=1, dropout=0.0):
+def ResidualBlock(inplanes, planes, dropout=0.0):
   layers = []
-  layers += [Conv3x3(inplanes, planes, strides)]
-  layers += [tfa.layers.InstanceNormalization()]
+  layers += [get_norm_layer('batch_norm')]
+  layers += [tf.keras.layers.ReLU()]
+  layers += [Conv3x3(inplanes, planes)]
+  layers += [get_norm_layer('batch_norm')]
   layers += [tf.keras.layers.ReLU()]
   layers += [Conv3x3(planes, planes)]
-  layers += [tfa.layers.InstanceNormalization()]
   if dropout > 0:
     layers += [tf.keras.layers.Dropout(rate=dropout)]
   block = tf.keras.Sequential(layers=layers)
@@ -73,14 +87,14 @@ class Encoder(tf.keras.Model):
 
     # Convolutional front-end
     layers = []
-    layers += [LeakyReLUConv2D(input_dim, ch, kernel_size=7, strides=1, padding=3)]
+    layers += [NormReLUConv2DBlock(input_dim, ch, kernel_size=7, strides=1, padding=3)]
     tch = ch
     for i in range(1, n_enc_front_blk):
-      layers += [LeakyReLUConv2D(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
+      layers += [NormReLUConv2DBlock(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
       tch *= 2
     # Residual-block back-end
     for i in range(0, n_enc_res_blk):
-      layers += [INSResBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
     self.model = tf.keras.Sequential(layers)
 
   def __call__(self, inputs, **kwargs):
@@ -104,7 +118,7 @@ class EncoderShared(tf.keras.Model):
     layers = []
     tch = ch * 2 ** (n_enc_front_blk - 1)
     for i in range(0, n_enc_shared_blk):
-      layers += [INSResBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
     layers += [tf.keras.layers.GaussianNoise(stddev=1.0)]
     self.model = tf.keras.Sequential(layers)
 
@@ -129,7 +143,7 @@ class DecoderShared(tf.keras.Model):
     layers = []
     tch = ch * 2 ** (n_enc_front_blk - 1)
     for i in range(0, n_dec_shared_blk):
-      layers += [INSResBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
     self.model = tf.keras.Sequential(layers)
 
   def __call__(self, inputs, **kwargs):
@@ -153,10 +167,10 @@ class Decoder(tf.keras.Model):
     layers = []
     tch = ch * 2 ** (n_enc_front_blk - 1)
     for i in range(0, n_dec_res_blk):
-      layers += [INSResBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
     # Convolutional back-end
     for i in range(0, n_dec_front_blk - 1):
-      layers += [LeakyReLUConv2DTranspose(tch, tch // 2, kernel_size=3, strides=2, padding=1, output_padding=1)]
+      layers += [NormReLUConv2DTransposeBlock(tch, tch // 2, kernel_size=3, strides=2, padding=1, output_padding=1)]
       tch = tch // 2
     layers += [Conv2DTransposePaddedSame(filters=input_dim, kernel_size=1, strides=1, padding=0, output_padding=0)]
     layers += [tf.keras.layers.Activation(tf.keras.activations.tanh)]
@@ -174,10 +188,10 @@ class Discriminator(tf.keras.Model):
     n_layer = params['n_layer']
 
     model = []
-    model += [LeakyReLUConv2D(input_dim, ch, kernel_size=3, strides=2, padding=1)]
+    model += [NormReLUConv2DBlock(input_dim, ch, kernel_size=3, strides=2, padding=1)]
     tch = ch
     for i in range(1, n_layer):
-      model += [LeakyReLUConv2D(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
+      model += [NormReLUConv2DBlock(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
       tch *= 2
     model += [tf.keras.layers.Conv2D(1, kernel_size=1, strides=1)]
     self.model = tf.keras.Sequential(layers=model)
@@ -189,21 +203,22 @@ class Discriminator(tf.keras.Model):
 
 
 class Controller(tf.keras.Model):
-  def __init__(self, params, ch):
+  def __init__(self, input_dim, control_hyperparameters, output_dim):
     super(Controller, self).__init__()
-    n_layer = params['n_layer']
-
+    # B x 8 x 16 x 32 -> 4096 -> 16 -> 2 | n_layer=0
+    # B x 4 x 8 x 32 -> 1024 -> 16 -> 2 | n_layer=1
+    # B x 2 x 4 x 32 -> 256 -> 16 -> 2 | n_layer=2
+    # B x 1 x 2 x 32 -> 64 -> 16 -> 2 | n_layer=3
     layers = []
-    # tch = ch
-    # for i in range(n_layer):
-    #   layers += [LeakyReLUConv2D(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
-    #   tch *= 2
-    layers.append(tf.keras.layers.AveragePooling2D(pool_size=(8, 16)))
+    for layer in range(control_hyperparameters['n_layer']):
+      layers.append(NormReLUConv2DBlock(input_dim, input_dim, kernel_size=3, strides=2, padding=1))
     layers.append(tf.keras.layers.Flatten())
-    layers.append(tf.keras.layers.Dense(16))
-    layers.append(tf.keras.layers.LeakyReLU())
-    layers.append(tf.keras.layers.Dense(2))
-    self.sequential = tf.keras.Sequential(layers=layers)
+    fc_layers_with_output = control_hyperparameters['fc_layers'] + [output_dim]
+    for fc_layer in fc_layers_with_output:
+      layers.append(get_norm_layer('batch_norm'))
+      layers.append(tf.keras.layers.ReLU())
+      layers.append(tf.keras.layers.Dense(fc_layer))
+    self.seq = tf.keras.Sequential(layers=layers)
 
   def __call__(self, inputs, **kwargs):
-    return self.sequential(inputs, **kwargs)
+    return self.seq(inputs, **kwargs)
