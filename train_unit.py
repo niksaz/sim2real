@@ -10,9 +10,9 @@ import imlib
 import tf2lib
 import tqdm
 
+import configuration
 import data
 import layers
-import utils
 
 
 @tf.function
@@ -289,8 +289,8 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
 
 
 def main():
-  args = utils.parse_args()
-  config = utils.load_config(args.config_path)
+  args = configuration.parse_args()
+  config = configuration.load_config(args.config_path)
   print('args:', args)
   print('config:', config)
 

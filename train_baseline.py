@@ -8,8 +8,8 @@ import tensorflow as tf
 import pylib
 import tqdm
 
+import configuration
 import data
-import utils
 import layers
 
 
@@ -181,8 +181,8 @@ def train_model(encoder_a, encoder_shared, controller, loss_fn, config):
 
 
 def main():
-  args = utils.parse_args()
-  config = utils.load_config(args.config_path)
+  args = configuration.parse_args()
+  config = configuration.load_config(args.config_path)
   print('args:', args)
   print('config:', config)
 
