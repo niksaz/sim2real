@@ -55,6 +55,15 @@ class T5Schedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     return lr
 
 
+class ConstantSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
+  def __init__(self, optimizer_hyperparameters):
+    self.lr = float(optimizer_hyperparameters['lr'])
+
+  def __call__(self, step):
+    learning_rate = tf.constant(value=self.lr, shape=[], dtype=tf.float32)
+    return learning_rate
+
+
 def create_optimizer_from_params(optimizer_hyperparameters):
   lr_schedule_class = globals()[optimizer_hyperparameters['lr_schedule_class']]
   lr_schedule = lr_schedule_class(optimizer_hyperparameters)

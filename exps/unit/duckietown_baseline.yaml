@@ -1,0 +1,60 @@
+config:
+  log_iterations: 100 # How often do you want to log the training stats
+  image_display_iterations: 250 # How often do you want to display output images during training
+  image_save_iterations: 2500 # How often do you want to save output images during training
+  checkpoint_save_iterations: 5000 # How often do you want to save trained models
+  hyperparameters:
+    trainer: Trainer
+    ll_direct_link_w: 100
+    kl_direct_link_w: 0.1
+    ll_cycle_link_w: 100
+    kl_cycle_link_w: 0.1
+    gan_w: 10
+    batch_size: 64
+    seed: 30
+    optimizer:
+      iterations: 100000
+      warmup_iterations: 10000
+      lr_schedule_class: T5Schedule
+      beta_1: 0.9
+      beta_2: 0.997
+      epsilon: 1e-9
+    gen:
+      ch: 8
+      input_dim: 3
+      n_enc_front_blk: 3
+      n_enc_res_blk: 3
+      n_enc_shared_blk: 1
+      n_dec_shared_blk: 1
+      n_dec_res_blk: 3
+      n_dec_front_blk: 3
+      res_dropout_ratio: 0.5
+      norm_layer: batch_norm
+    dis:
+      ch: 8
+      input_dim: 3
+      n_layer: 4
+    control:
+      n_layer: 3
+      fc_layers: [16]
+  datasets:
+    general:
+      datasets_dir: datasets/duckiebot
+      load_size: [32, 64] # height, width
+      crop_size: [32, 64] # height, width
+    train_a:
+      dataset_name: trainA
+      filter_images: '*.png'
+      filter_actions: '*.npy'
+    train_b:
+      dataset_name: trainB
+      filter_images: '*.png'
+      filter_actions: '*.npy'
+    test_a:
+      dataset_name: testA
+      filter_images: '*.png'
+      filter_actions: '*.npy'
+    test_b:
+      dataset_name: testB
+      filter_images: '*.png'
+      filter_actions: '*.npy'

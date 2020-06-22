@@ -32,17 +32,19 @@ def Conv2DTransposePaddedSame(filters, kernel_size, strides, padding, output_pad
           filters=filters, kernel_size=kernel_size, strides=strides, padding='same', output_padding=output_padding)
 
 
-def NormReLUConv2DBlock(input_filters, output_filters, kernel_size, strides, padding):
+def NormReLUConv2DBlock(
+    input_filters, output_filters, kernel_size, strides, padding, norm_layer):
   layers = []
-  layers.append(get_norm_layer('batch_norm'))
+  layers.append(get_norm_layer(norm_layer))
   layers.append(tf.keras.layers.ReLU())
   layers.append(Conv2DPadded(output_filters, kernel_size, strides, padding))
   return tf.keras.Sequential(layers=layers)
 
 
-def NormReLUConv2DTransposeBlock(input_filters, output_filters, kernel_size, strides, padding, output_padding):
+def NormReLUConv2DTransposeBlock(
+    input_filters, output_filters, kernel_size, strides, padding, output_padding, norm_layer):
   layers = []
-  layers.append(get_norm_layer('batch_norm'))
+  layers.append(get_norm_layer(norm_layer))
   layers.append(tf.keras.layers.ReLU())
   layers.append(Conv2DTransposePaddedSame(output_filters, kernel_size, strides, padding, output_padding))
   return tf.keras.Sequential(layers=layers)
@@ -52,12 +54,12 @@ def Conv3x3(inplanes, outplanes, strides=1):
   return Conv2DPadded(outplanes, kernel_size=3, strides=strides, padding=1)
 
 
-def ResidualBlock(inplanes, planes, dropout=0.0):
+def ResidualBlock(inplanes, planes, norm_layer, dropout=0.0):
   layers = []
-  layers += [get_norm_layer('batch_norm')]
+  layers += [get_norm_layer(norm_layer)]
   layers += [tf.keras.layers.ReLU()]
   layers += [Conv3x3(inplanes, planes)]
-  layers += [get_norm_layer('batch_norm')]
+  layers += [get_norm_layer(norm_layer)]
   layers += [tf.keras.layers.ReLU()]
   layers += [Conv3x3(planes, planes)]
   if dropout > 0:
@@ -84,17 +86,18 @@ class Encoder(tf.keras.Model):
     n_dec_res_blk = params['n_dec_res_blk']
     n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
+    norm_layer = params['norm_layer']
 
     # Convolutional front-end
     layers = []
-    layers += [NormReLUConv2DBlock(input_dim, ch, kernel_size=7, strides=1, padding=3)]
+    layers += [NormReLUConv2DBlock(input_dim, ch, kernel_size=7, strides=1, padding=3, norm_layer=norm_layer)]
     tch = ch
     for i in range(1, n_enc_front_blk):
-      layers += [NormReLUConv2DBlock(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
+      layers += [NormReLUConv2DBlock(tch, tch * 2, kernel_size=3, strides=2, padding=1, norm_layer=norm_layer)]
       tch *= 2
     # Residual-block back-end
     for i in range(0, n_enc_res_blk):
-      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, norm_layer, dropout=res_dropout_ratio)]
     self.model = tf.keras.Sequential(layers)
 
   def __call__(self, inputs, **kwargs):
@@ -113,12 +116,13 @@ class EncoderShared(tf.keras.Model):
     n_dec_res_blk = params['n_dec_res_blk']
     n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
+    norm_layer = params['norm_layer']
 
     # Shared residual-blocks
     layers = []
     tch = ch * 2 ** (n_enc_front_blk - 1)
     for i in range(0, n_enc_shared_blk):
-      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, norm_layer, dropout=res_dropout_ratio)]
     layers += [tf.keras.layers.GaussianNoise(stddev=1.0)]
     self.model = tf.keras.Sequential(layers)
 
@@ -138,12 +142,13 @@ class DecoderShared(tf.keras.Model):
     n_dec_res_blk = params['n_dec_res_blk']
     n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
+    norm_layer = params['norm_layer']
 
     # Shared residual-blocks
     layers = []
     tch = ch * 2 ** (n_enc_front_blk - 1)
     for i in range(0, n_dec_shared_blk):
-      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, norm_layer, dropout=res_dropout_ratio)]
     self.model = tf.keras.Sequential(layers)
 
   def __call__(self, inputs, **kwargs):
@@ -162,15 +167,17 @@ class Decoder(tf.keras.Model):
     n_dec_res_blk = params['n_dec_res_blk']
     n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
+    norm_layer = params['norm_layer']
 
     # Residual-block front-end
     layers = []
     tch = ch * 2 ** (n_enc_front_blk - 1)
     for i in range(0, n_dec_res_blk):
-      layers += [ResidualBlock(tch, tch, dropout=res_dropout_ratio)]
+      layers += [ResidualBlock(tch, tch, norm_layer, dropout=res_dropout_ratio)]
     # Convolutional back-end
     for i in range(0, n_dec_front_blk - 1):
-      layers += [NormReLUConv2DTransposeBlock(tch, tch // 2, kernel_size=3, strides=2, padding=1, output_padding=1)]
+      layers += [NormReLUConv2DTransposeBlock(
+          tch, tch // 2, kernel_size=3, strides=2, padding=1, output_padding=1, norm_layer=norm_layer)]
       tch = tch // 2
     layers += [Conv2DTransposePaddedSame(filters=input_dim, kernel_size=1, strides=1, padding=0, output_padding=0)]
     layers += [tf.keras.layers.Activation(tf.keras.activations.tanh)]
@@ -186,12 +193,13 @@ class Discriminator(tf.keras.Model):
     ch = params['ch']
     input_dim = params['input_dim']
     n_layer = params['n_layer']
+    norm_layer = params['norm_layer']
 
     model = []
-    model += [NormReLUConv2DBlock(input_dim, ch, kernel_size=3, strides=2, padding=1)]
+    model += [NormReLUConv2DBlock(input_dim, ch, kernel_size=3, strides=2, padding=1, norm_layer=norm_layer)]
     tch = ch
     for i in range(1, n_layer):
-      model += [NormReLUConv2DBlock(tch, tch * 2, kernel_size=3, strides=2, padding=1)]
+      model += [NormReLUConv2DBlock(tch, tch * 2, kernel_size=3, strides=2, padding=1, norm_layer=norm_layer)]
       tch *= 2
     model += [tf.keras.layers.Conv2D(1, kernel_size=1, strides=1)]
     self.model = tf.keras.Sequential(layers=model)
@@ -211,7 +219,9 @@ class Controller(tf.keras.Model):
     # B x 1 x 2 x 32 -> 64 -> 16 -> 2 | n_layer=3
     layers = []
     for layer in range(control_hyperparameters['n_layer']):
-      layers.append(NormReLUConv2DBlock(input_dim, input_dim, kernel_size=3, strides=2, padding=1))
+      conv_block = NormReLUConv2DBlock(
+          input_dim, input_dim, kernel_size=3, strides=2, padding=1, norm_layer='batch_norm')
+      layers.append(conv_block)
     layers.append(tf.keras.layers.Flatten())
     fc_layers_with_output = control_hyperparameters['fc_layers'] + [output_dim]
     for fc_layer in fc_layers_with_output:

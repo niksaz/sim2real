@@ -1,7 +1,6 @@
 # Author: Mikita Sazanovich
 
 import os
-import time
 
 import tensorflow as tf
 import numpy as np
@@ -13,6 +12,8 @@ import tqdm
 import configuration
 import data
 import layers
+import optimization
+import utils
 
 
 @tf.function
@@ -85,9 +86,8 @@ class Trainer(object):
     super(Trainer, self).__init__()
     self.model = model
     self.hyperparameters = hyperparameters
-    lr = self.hyperparameters['lr']
-    self.enc_dec_opt = tf.keras.optimizers.Adam(learning_rate=lr, beta_1=0.5, beta_2=0.999, decay=0.0001)
-    self.discrim_opt = tf.keras.optimizers.Adam(learning_rate=lr, beta_1=0.5, beta_2=0.999, decay=0.0001)
+    self.enc_dec_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
+    self.discrim_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
     self.dis_loss_criterion = tf.keras.losses.BinaryCrossentropy()
     self.ll_loss_criterion_a = tf.keras.losses.MeanAbsoluteError()
     self.ll_loss_criterion_b = tf.keras.losses.MeanAbsoluteError()
@@ -220,8 +220,10 @@ def create_datasets(config):
 
   config_train_a = config_datasets['train_a']
   config_train_b = config_datasets['train_b']
-  train_a_paths = pylib.glob(os.path.join(datasets_dir, config_train_a['dataset_name']), config_train_a['filter'])
-  train_b_paths = pylib.glob(os.path.join(datasets_dir, config_train_b['dataset_name']), config_train_b['filter'])
+  train_a_paths = pylib.glob(
+      os.path.join(datasets_dir, config_train_a['dataset_name']), config_train_a['filter_images'])
+  train_b_paths = pylib.glob(
+      os.path.join(datasets_dir, config_train_b['dataset_name']), config_train_b['filter_images'])
   ab_train_dataset, ab_train_length = data.make_zip_dataset(
       train_a_paths,
       train_b_paths,
@@ -230,14 +232,13 @@ def create_datasets(config):
       crop_size,
       training=True,
       repeat=False)
-  print(f'len(train_a_paths) = {len(train_a_paths)}')
-  print(f'len(train_b_paths) = {len(train_b_paths)}')
-  print(f'{ab_train_length} batches in AB train')
 
   config_test_a = config_datasets['test_a']
   config_test_b = config_datasets['test_b']
-  test_a_paths = pylib.glob(os.path.join(datasets_dir, config_test_a['dataset_name']), config_test_a['filter'])
-  test_b_paths = pylib.glob(os.path.join(datasets_dir, config_test_b['dataset_name']), config_test_b['filter'])
+  test_a_paths = pylib.glob(
+      os.path.join(datasets_dir, config_test_a['dataset_name']), config_test_a['filter_images'])
+  test_b_paths = pylib.glob(
+      os.path.join(datasets_dir, config_test_b['dataset_name']), config_test_b['filter_images'])
   ab_test_dataset, ab_test_length = data.make_zip_dataset(
       test_a_paths,
       test_b_paths,
@@ -246,18 +247,15 @@ def create_datasets(config):
       crop_size,
       training=False,
       repeat=True)
-  print(f'len(test_a_paths) = {len(test_a_paths)}')
-  print(f'len(test_b_paths) = {len(test_b_paths)}')
-  print(f'{ab_test_length} batches in AB test')
 
   return ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length
 
 
 def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint):
   train_summary_writer = tf.summary.create_file_writer(summaries_dir)
-  max_iterations = config['hyperparameters']['max_iterations']
+  optimizer_iterations = config['hyperparameters']['optimizer']['iterations']
   dataset_iter = iter(ab_train_dataset)
-  for iterations in tqdm.tqdm(range(max_iterations)):
+  for iterations in tqdm.tqdm(range(optimizer_iterations)):
     try:
       images_a, images_b = next(dataset_iter)
     except StopIteration:
@@ -284,7 +282,7 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
       img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
       imlib.imwrite(img, img_filename)
     # Checkpointing ops
-    if (iterations + 1) % config['checkpoint_save_iterations'] == 0 or iterations + 1 == max_iterations:
+    if (iterations + 1) % config['checkpoint_save_iterations'] == 0 or iterations + 1 == optimizer_iterations:
       checkpoint.save(iterations + 1)
 
 
@@ -294,27 +292,16 @@ def main():
   print('args:', args)
   print('config:', config)
 
-  tf.random.set_seed(config['hyperparameters']['seed'])
-  np.random.seed(config['hyperparameters']['seed'])
+  utils.fix_random_seeds(config['hyperparameters']['seed'])
 
   ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length = create_datasets(config)
 
   unit_model = UNITModel(config)
   trainer = Trainer(unit_model, config['hyperparameters'])
 
-  # Output directories
-  output_dir_base = args.output_dir_base
-  output_dir_name = f'unit-{args.tag}-{time.strftime("%Y%m%d%H%M%S")}'
-  output_dir = os.path.join(output_dir_base, output_dir_name)
-  os.makedirs(output_dir, exist_ok=False)
+  samples_dir, summaries_dir, checkpoints_dir = utils.create_output_dirs(
+      args.output_dir_base, 'unit', args.tag, ['samples', 'summaries', 'checkpoints'])
 
-  samples_dir = os.path.join(output_dir, 'samples')
-  summaries_dir = os.path.join(output_dir, 'summaries')
-  os.makedirs(samples_dir, exist_ok=False)
-  os.makedirs(summaries_dir, exist_ok=False)
-
-  # Checkpointing setup
-  checkpoints_dir = os.path.join(output_dir, 'checkpoints')
   checkpoint_dict = {
       'encoder_a': unit_model.encoder_a,
       'encoder_b': unit_model.encoder_b,

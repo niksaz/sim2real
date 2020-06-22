@@ -12,9 +12,10 @@ import configuration
 import data
 import layers
 import optimization
+import utils
 
 
-def create_dataset(config, dataset_label, training):
+def create_image_voltages_dataset(config, dataset_label, training):
   config_datasets = config['datasets']
   datasets_dir = config_datasets['general']['datasets_dir']
   load_size = config_datasets['general']['load_size']
@@ -96,10 +97,10 @@ def train_model(encoder_a, encoder_shared, controller, loss_fn, config):
     return loss
 
   train_mean_loss = tf.keras.metrics.Mean()
-  train_dataset, _ = create_dataset(config, dataset_label='train_a', training=True)
+  train_dataset, _ = create_image_voltages_dataset(config, dataset_label='train_a', training=True)
   train_iter = iter(train_dataset)
   test_mean_loss = tf.keras.metrics.Mean()
-  test_dataset, test_dataset_length = create_dataset(config, dataset_label='test_a', training=False)
+  test_dataset, test_dataset_length = create_image_voltages_dataset(config, dataset_label='test_a', training=False)
 
   optimizer_iterations = optimizer_hyperparameters['iterations']
   for iterations in tqdm.tqdm(range(optimizer_iterations)):
@@ -129,6 +130,8 @@ def main():
   print('args:', args)
   print('config:', config)
 
+  utils.fix_random_seeds(config['hyperparameters']['seed'])
+
   gen_hyperparameters = config['hyperparameters']['gen']
   encoder_a = layers.Encoder(gen_hyperparameters)
   encoder_shared = layers.EncoderShared(gen_hyperparameters)
@@ -136,13 +139,7 @@ def main():
   control_hyperparameters = config['hyperparameters']['control']
   controller = layers.Controller(z_ch, control_hyperparameters, 2)
 
-  # output dirs
-  output_dir_base = args.output_dir_base
-  output_dir_name = f'{args.tag}-{time.strftime("%Y%m%d%H%M%S")}'
-  output_dir = os.path.join(output_dir_base, 'baseline', output_dir_name)
-  os.makedirs(output_dir, exist_ok=False)
-  summaries_dir = os.path.join(output_dir, 'summaries')
-  os.makedirs(summaries_dir, exist_ok=False)
+  summaries_dir, = utils.create_output_dirs(args.output_dir_base, 'baseline', args.tag, ['summaries'])
 
   writer = tf.summary.create_file_writer(summaries_dir)
   loss_fn = tf.keras.losses.MeanSquaredError()
