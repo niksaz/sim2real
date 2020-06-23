@@ -35,18 +35,20 @@ def Conv2DTransposePaddedSame(filters, kernel_size, strides, padding, output_pad
 def NormReLUConv2DBlock(
     input_filters, output_filters, kernel_size, strides, padding, norm_layer):
   layers = []
-  layers.append(get_norm_layer(norm_layer))
-  layers.append(tf.keras.layers.ReLU())
   layers.append(Conv2DPadded(output_filters, kernel_size, strides, padding))
+  # layers.append(tf.keras.layers.LeakyReLU())  # TODO(sazanovich): alpha = 0.3 while in torch it is 0.01
+  # layers.append(get_norm_layer(norm_layer))
+  layers.append(tf.keras.layers.ReLU())
   return tf.keras.Sequential(layers=layers)
 
 
 def NormReLUConv2DTransposeBlock(
     input_filters, output_filters, kernel_size, strides, padding, output_padding, norm_layer):
   layers = []
-  layers.append(get_norm_layer(norm_layer))
-  layers.append(tf.keras.layers.ReLU())
   layers.append(Conv2DTransposePaddedSame(output_filters, kernel_size, strides, padding, output_padding))
+  # layers.append(tf.keras.layers.LeakyReLU())  # TODO(sazanovich): alpha = 0.3 while in torch it is 0.01
+  # layers.append(get_norm_layer(norm_layer))
+  layers.append(tf.keras.layers.ReLU())
   return tf.keras.Sequential(layers=layers)
 
 
@@ -56,12 +58,12 @@ def Conv3x3(inplanes, outplanes, strides=1):
 
 def ResidualBlock(inplanes, planes, norm_layer, dropout=0.0):
   layers = []
-  layers += [get_norm_layer(norm_layer)]
-  layers += [tf.keras.layers.ReLU()]
   layers += [Conv3x3(inplanes, planes)]
   layers += [get_norm_layer(norm_layer)]
   layers += [tf.keras.layers.ReLU()]
   layers += [Conv3x3(planes, planes)]
+  layers += [get_norm_layer(norm_layer)]
+  # layers += [tf.keras.layers.ReLU()]
   if dropout > 0:
     layers += [tf.keras.layers.Dropout(rate=dropout)]
   block = tf.keras.Sequential(layers=layers)
