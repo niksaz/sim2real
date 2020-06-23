@@ -210,45 +210,37 @@ class Trainer(object):
     return G_images, G_loss_dict
 
 
-def create_datasets(config):
+def create_datasets(config, split):
   config_datasets = config['datasets']
   datasets_dir = config_datasets['general']['datasets_dir']
   load_size = config_datasets['general']['load_size']
   crop_size = config_datasets['general']['crop_size']
-
   batch_size = config['hyperparameters']['batch_size']
 
-  config_train_a = config_datasets['train_a']
-  config_train_b = config_datasets['train_b']
-  train_a_paths = pylib.glob(
-      os.path.join(datasets_dir, config_train_a['dataset_name']), config_train_a['filter_images'])
-  train_b_paths = pylib.glob(
-      os.path.join(datasets_dir, config_train_b['dataset_name']), config_train_b['filter_images'])
-  ab_train_dataset, ab_train_length = data.make_zip_dataset(
-      train_a_paths,
-      train_b_paths,
+  if split == 'train':
+    handle_image_a = 'train_a'
+    handle_image_b = 'train_b'
+  elif split == 'test':
+    handle_image_a = 'test_a'
+    handle_image_b = 'test_b'
+  else:
+    raise ValueError('split should be either train or test, got ' + split)
+
+  config_image_a = config_datasets[handle_image_a]
+  config_image_b = config_datasets[handle_image_b]
+  paths_image_a = pylib.glob(
+      os.path.join(datasets_dir, config_image_a['dataset_name']), config_image_a['filter_images'])
+  paths_image_b = pylib.glob(
+      os.path.join(datasets_dir, config_image_b['dataset_name']), config_image_b['filter_images'])
+  ab_dataset, ab_length = data.make_zip_dataset(
+      paths_image_a,
+      paths_image_b,
       batch_size,
       load_size,
       crop_size,
-      training=True,
-      repeat=False)
-
-  config_test_a = config_datasets['test_a']
-  config_test_b = config_datasets['test_b']
-  test_a_paths = pylib.glob(
-      os.path.join(datasets_dir, config_test_a['dataset_name']), config_test_a['filter_images'])
-  test_b_paths = pylib.glob(
-      os.path.join(datasets_dir, config_test_b['dataset_name']), config_test_b['filter_images'])
-  ab_test_dataset, ab_test_length = data.make_zip_dataset(
-      test_a_paths,
-      test_b_paths,
-      batch_size,
-      load_size,
-      crop_size,
-      training=False,
-      repeat=True)
-
-  return ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length
+      training=True if split == 'train' else False,
+      repeat=False if split == 'train' else True)
+  return ab_dataset, ab_length
 
 
 def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint):
@@ -259,7 +251,6 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
     try:
       images_a, images_b = next(dataset_iter)
     except StopIteration:
-      print('Resetting the iterator...')
       dataset_iter = iter(ab_train_dataset)
       images_a, images_b = next(dataset_iter)
 
@@ -294,7 +285,8 @@ def main():
 
   utils.fix_random_seeds(config['hyperparameters']['seed'])
 
-  ab_train_dataset, ab_train_length, ab_test_dataset, ab_test_length = create_datasets(config)
+  ab_train_dataset, ab_train_length = create_datasets(config, split='train')
+  ab_test_dataset, ab_test_length = create_datasets(config, split='test')
 
   unit_model = UNITModel(config)
   trainer = Trainer(unit_model, config['hyperparameters'])
@@ -353,6 +345,12 @@ def main():
         img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
         img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
         imlib.imwrite(img, img_filename)
+
+  if args.summarize:
+    unit_model.encoder_a.model.summary()
+    unit_model.encoder_b.model.summary()
+    unit_model.encoder_shared.model.summary()
+    unit_model.decoder_shared.model.summary()
 
 
 if __name__ == '__main__':
