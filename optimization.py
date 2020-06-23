@@ -67,9 +67,13 @@ class ConstantSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
 def create_optimizer_from_params(optimizer_hyperparameters):
   lr_schedule_class = globals()[optimizer_hyperparameters['lr_schedule_class']]
   lr_schedule = lr_schedule_class(optimizer_hyperparameters)
-  optimizer = tf.keras.optimizers.Adam(
-      learning_rate=lr_schedule,
-      beta_1=float(optimizer_hyperparameters['beta_1']),
-      beta_2=float(optimizer_hyperparameters['beta_2']),
-      epsilon=float(optimizer_hyperparameters['epsilon']))
+  adam_params = {
+      'learning_rate': lr_schedule,
+      'beta_1': float(optimizer_hyperparameters['beta_1']),
+      'beta_2': float(optimizer_hyperparameters['beta_2']),
+      'epsilon': float(optimizer_hyperparameters['epsilon']),
+  }
+  if 'decay' in optimizer_hyperparameters:
+    adam_params['decay'] = optimizer_hyperparameters['decay']
+  optimizer = tf.keras.optimizers.Adam(**adam_params)
   return optimizer
