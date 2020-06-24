@@ -51,32 +51,32 @@ class UNITModel(object):
     self.dis_b = layers.Discriminator(dis_hyperparameters)
 
   @tf.function
-  def encoder_decoder_ab_abab(self, x_a, x_b):
-    encoded_a = self.encoder_a(x_a)
-    encoded_b = self.encoder_b(x_b)
+  def encode_ab_decode_aabb(self, x_a, x_b, training):
+    encoded_a = self.encoder_a(x_a, training=training)
+    encoded_b = self.encoder_b(x_b, training=training)
     encoded_ab = tf.concat((encoded_a, encoded_b), axis=0)
-    encoded_shared = self.encoder_shared(encoded_ab)
-    decoded_shared = self.decoder_shared(encoded_shared)
-    decoded_a = self.decoder_a(decoded_shared)
-    decoded_b = self.decoder_b(decoded_shared)
+    encoded_shared = self.encoder_shared(encoded_ab, training=training)
+    decoded_shared = self.decoder_shared(encoded_shared, training=training)
+    decoded_a = self.decoder_a(decoded_shared, training=training)
+    decoded_b = self.decoder_b(decoded_shared, training=training)
     x_aa, x_ba = tf.split(decoded_a, num_or_size_splits=2, axis=0)
     x_ab, x_bb = tf.split(decoded_b, num_or_size_splits=2, axis=0)
     return x_aa, x_ba, x_ab, x_bb, encoded_shared
 
   @tf.function
-  def encoder_decoder_a_b(self, x_a):
-    encoded_a = self.encoder_a(x_a)
-    encoded_shared = self.encoder_shared(encoded_a)
-    decoded_shared = self.decoder_shared(encoded_shared)
-    decoded_b = self.decoder_b(decoded_shared)
+  def encode_a_decode_b(self, x_a, training):
+    encoded_a = self.encoder_a(x_a, training=training)
+    encoded_shared = self.encoder_shared(encoded_a, training=training)
+    decoded_shared = self.decoder_shared(encoded_shared, training=training)
+    decoded_b = self.decoder_b(decoded_shared, training=training)
     return decoded_b, encoded_shared
 
   @tf.function
-  def encoder_decoder_b_a(self, x_b):
-    encoded_b = self.encoder_b(x_b)
-    encoded_shared = self.encoder_shared(encoded_b)
-    decoded_shared = self.decoder_shared(encoded_shared)
-    decoded_a = self.decoder_a(decoded_shared)
+  def encode_b_decode_a(self, x_b, training):
+    encoded_b = self.encoder_b(x_b, training=training)
+    encoded_shared = self.encoder_shared(encoded_b, training=training)
+    decoded_shared = self.decoder_shared(encoded_shared, training=training)
+    decoded_a = self.decoder_a(decoded_shared, training=training)
     return decoded_a, encoded_shared
 
 
@@ -86,29 +86,30 @@ class Trainer(object):
     self.model = model
     self.controller = controller
     self.hyperparameters = hyperparameters
-    self.enc_dec_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
-    self.discrim_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
-    self.controller_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
+    self.gen_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
+    self.dis_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
+    self.control_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
     self.dis_loss_criterion = tf.keras.losses.BinaryCrossentropy()
     self.ll_loss_criterion_a = tf.keras.losses.MeanAbsoluteError()
     self.ll_loss_criterion_b = tf.keras.losses.MeanAbsoluteError()
-    self.controller_loss_fn = tf.keras.losses.MeanSquaredError()
+    self.control_loss_fn = tf.keras.losses.MeanSquaredError()
 
   @tf.function
   def train_step(self, images_a, images_b, actions_a):
     D_loss_dict = self.dis_update(images_a, images_b)
-    G_images, G_loss_dict = self.enc_dec_update(images_a, images_b)
-    C_loss_dict = self.controller_update(images_a, actions_a)
+    G_images, G_loss_dict = self.gen_update(images_a, images_b)
+    C_loss_dict = self.control_update(images_a, actions_a)
     return D_loss_dict, G_images, G_loss_dict, C_loss_dict
 
   @tf.function
   def dis_update(self, images_a, images_b):
+    training = True
     with tf.GradientTape() as t:
-      x_aa, x_ba, x_ab, x_bb, shared = self.model.encoder_decoder_ab_abab(images_a, images_b)
+      x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
       data_a = tf.concat((images_a, x_ba), axis=0)
       data_b = tf.concat((images_b, x_ab), axis=0)
-      res_a = self.model.dis_a(data_a)
-      res_b = self.model.dis_b(data_b)
+      res_a = self.model.dis_a(data_a, training=training)
+      res_b = self.model.dis_b(data_b, training=training)
       for it, (this_a, this_b) in enumerate(zip(res_a, res_b)):
         out_a = tf.keras.activations.sigmoid(this_a)
         out_b = tf.keras.activations.sigmoid(this_b)
@@ -130,12 +131,8 @@ class Trainer(object):
           ad_loss_b += ad_true_loss_b + ad_fake_loss_b
       loss = self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
 
-    variables = []
     dis_models = [self.model.dis_a, self.model.dis_b]
-    for model in dis_models:
-      variables.extend(model.trainable_variables)
-    grads = t.gradient(loss, variables)
-    self.discrim_opt.apply_gradients(zip(grads, variables))
+    self._compute_and_apply_gradients(dis_models, self.dis_opt, t, loss)
 
     true_a_acc_batch = _compute_true_acc(out_true_a)
     true_b_acc_batch = _compute_true_acc(out_true_b)
@@ -152,13 +149,14 @@ class Trainer(object):
     return D_loss_dict
 
   @tf.function
-  def enc_dec_update(self, images_a, images_b):
+  def gen_update(self, images_a, images_b):
+    training = True
     with tf.GradientTape() as t:
-      x_aa, x_ba, x_ab, x_bb, shared = self.model.encoder_decoder_ab_abab(images_a, images_b)
-      x_bab, shared_bab = self.model.encoder_decoder_a_b(x_ba)
-      x_aba, shared_aba = self.model.encoder_decoder_b_a(x_ab)
-      outs_a = self.model.dis_a(x_ba)
-      outs_b = self.model.dis_b(x_ab)
+      x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
+      x_bab, shared_bab = self.model.encode_a_decode_b(x_ba, training=training)
+      x_aba, shared_aba = self.model.encode_b_decode_a(x_ab, training=training)
+      outs_a = self.model.dis_a(x_ba, training=training)
+      outs_b = self.model.dis_b(x_ab, training=training)
       for it, (out_a, out_b) in enumerate(zip(outs_a, outs_b)):
         outputs_a = tf.keras.activations.sigmoid(out_a)
         outputs_b = tf.keras.activations.sigmoid(out_b)
@@ -187,15 +185,11 @@ class Trainer(object):
           + self.hyperparameters['kl_direct_link_w'] * (enc_loss + enc_loss)
           + self.hyperparameters['kl_cycle_link_w'] * (enc_bab_loss + enc_aba_loss))
 
-    variables = []
     gen_models = [
         self.model.encoder_a, self.model.encoder_b,
         self.model.encoder_shared, self.model.decoder_shared,
         self.model.decoder_a, self.model.decoder_b]
-    for model in gen_models:
-      variables.extend(model.trainable_variables)
-    grads = t.gradient(loss, variables)
-    self.enc_dec_opt.apply_gradients(zip(grads, variables))
+    self._compute_and_apply_gradients(gen_models, self.gen_opt, t, loss)
 
     G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
     G_loss_dict = {
@@ -212,24 +206,28 @@ class Trainer(object):
     }
     return G_images, G_loss_dict
 
-  def controller_update(self, images_a, actions_a):
+  @tf.function
+  def control_update(self, images_a, actions_a):
+    training = True
     with tf.GradientTape() as t:
-      encoded_a = self.model.encoder_a(images_a)
-      encoded_shared_a = self.model.encoder_shared(encoded_a)
-      predictions = self.controller(encoded_shared_a)
-      loss = self.controller_loss_fn(actions_a, predictions)
+      encoded_a = self.model.encoder_a(images_a, training=training)
+      encoded_shared_a = self.model.encoder_shared(encoded_a, training=training)
+      predictions_a = self.controller(encoded_shared_a, training=training)
+      loss = self.control_loss_fn(actions_a, predictions_a)
 
-    variables = []
     control_models = [self.model.encoder_a, self.model.encoder_shared, self.controller]
-    for model in control_models:
-      variables.extend(model.trainable_variables)
-    grads = t.gradient(loss, variables)
-    self.controller_opt.apply_gradients(zip(grads, variables))
+    self._compute_and_apply_gradients(control_models, self.control_opt, t, loss)
 
-    C_loss_dict = {
-        'loss': loss,
-    }
+    C_loss_dict = {'loss': loss}
     return C_loss_dict
+
+  @staticmethod
+  def _compute_and_apply_gradients(models, optimizer, tape, loss) -> None:
+    variables = []
+    for model in models:
+      variables.extend(model.trainable_variables)
+    grads = tape.gradient(loss, variables)
+    optimizer.apply_gradients(zip(grads, variables))
 
 
 def create_datasets(config, split):
@@ -266,9 +264,9 @@ def create_datasets(config, split):
   return zip_dataset, len_dataset
 
 
-def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint):
-  train_summary_writer = tf.summary.create_file_writer(summaries_dir)
+def train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir):
   optimizer_iterations = config['hyperparameters']['optimizer']['iterations']
+  train_control_loss_mean = tf.keras.metrics.Mean()
   dataset_iter = iter(ab_train_dataset)
   for iterations in tqdm.tqdm(range(optimizer_iterations)):
     try:
@@ -279,13 +277,15 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
 
     # Training ops
     D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.train_step(images_a, images_b, actions_a)
+    train_control_loss_mean.update_state(C_loss_dict['loss'])
 
     # Logging ops
     if (iterations + 1) % config['log_iterations'] == 0:
-      with train_summary_writer.as_default():
-        tf2lib.summary(D_loss_dict, step=iterations, name='discriminator')
-        tf2lib.summary(G_loss_dict, step=iterations, name='generator')
-        tf2lib.summary(C_loss_dict, step=iterations, name='controller')
+      C_loss_dict['loss'] = train_control_loss_mean.result()
+      train_control_loss_mean.reset_states()
+      tf2lib.summary(D_loss_dict, step=iterations, name='discriminator')
+      tf2lib.summary(G_loss_dict, step=iterations, name='generator')
+      tf2lib.summary(C_loss_dict, step=iterations, name='controller')
     # Displaying ops
     if (iterations + 1) % config['image_save_iterations'] == 0:
       img_filename = os.path.join(samples_dir, f'train_{iterations + 1}.jpg')
@@ -299,6 +299,38 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
     # Checkpointing ops
     if (iterations + 1) % config['checkpoint_save_iterations'] == 0 or iterations + 1 == optimizer_iterations:
       checkpoint.save(iterations + 1)
+
+
+def test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_dir):
+  training = False
+  test_control_loss = tf.keras.metrics.MeanSquaredError()
+  test_control_loss_mean = tf.keras.metrics.Mean()
+  test_batches_to_save = 10
+  test_dataset_iter = iter(ab_test_dataset)
+  for iterations in tqdm.tqdm(range(ab_test_length)):
+    try:
+      images_a, actions_a, images_b, actions_b = next(test_dataset_iter)
+    except StopIteration:
+      break
+
+    # Test ops
+    x_aa, x_ba, x_ab, x_bb, shared = unit_model.encode_ab_decode_aabb(images_a, images_b, training=training)
+    x_bab, _ = unit_model.encode_a_decode_b(x_ba, training=training)
+    x_aba, _ = unit_model.encode_b_decode_a(x_ab, training=training)
+    G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
+    shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
+    predictions_a = controller(shared_a, training=training)
+    control_loss = test_control_loss(actions_a, predictions_a)
+    test_control_loss_mean.update_state(control_loss.numpy())
+
+    # Displaying ops
+    if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
+      img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
+      img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
+      imlib.imwrite(img, img_filename)
+
+  loss_dict = {'loss_test_mean': test_control_loss_mean.result()}
+  tf2lib.summary(loss_dict, step=0, name='controller')
 
 
 def main():
@@ -331,17 +363,21 @@ def main():
       'decoder_b': unit_model.decoder_b,
       'dis_a': unit_model.dis_a,
       'dis_b': unit_model.dis_b,
-      'enc_dec_opt': trainer.enc_dec_opt,
-      'discrim_opt': trainer.discrim_opt,
+      'controller': controller.model,
+      'gen_opt': trainer.gen_opt,
+      'dis_opt': trainer.dis_opt,
+      'control_opt': trainer.control_opt,
   }
   checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=5)
   try:  # Restore checkpoint
     checkpoint.restore().assert_existing_objects_matched()
   except Exception as e:
     print(e)
+  summary_writer = tf.summary.create_file_writer(summaries_dir)
 
   if not args.skip_train:
-    train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpoint)
+    with summary_writer.as_default():
+      train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir)
 
   if not args.skip_test:
     # Restore from the test checkpoint
@@ -353,33 +389,15 @@ def main():
 
     test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
     test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
-
-    test_batches_to_save = 10
-    test_dataset_iter = iter(ab_test_dataset)
-    for iterations in tqdm.tqdm(range(ab_test_length)):
-      try:
-        images_a, actions_a, images_b, actions_b = next(test_dataset_iter)
-      except StopIteration:
-        break
-
-      # Inference ops
-      x_aa, x_ba, x_ab, x_bb, shared = unit_model.encoder_decoder_ab_abab(images_a, images_b)
-      x_bab, shared_bab = unit_model.encoder_decoder_a_b(x_ba)
-      x_aba, shared_aba = unit_model.encoder_decoder_b_a(x_ab)
-      G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
-
-      # Displaying ops
-      if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
-        img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
-        img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
-        imlib.imwrite(img, img_filename)
+    with summary_writer.as_default():
+      test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_dir)
 
   if args.summarize:
     unit_model.encoder_a.model.summary()
     unit_model.encoder_b.model.summary()
     unit_model.encoder_shared.model.summary()
     unit_model.decoder_shared.model.summary()
-    controller.seq.summary()
+    controller.model.summary()
 
 
 if __name__ == '__main__':

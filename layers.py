@@ -230,7 +230,7 @@ class Controller(tf.keras.Model):
       layers.append(get_norm_layer('batch_norm'))
       layers.append(tf.keras.layers.ReLU())
       layers.append(tf.keras.layers.Dense(fc_layer))
-    self.seq = tf.keras.Sequential(layers=layers)
+    self.model = tf.keras.Sequential(layers=layers)
 
   def __call__(self, inputs, **kwargs):
-    return self.seq(inputs, **kwargs)
+    return self.model(inputs, **kwargs)

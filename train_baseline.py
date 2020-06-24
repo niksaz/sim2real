@@ -1,7 +1,6 @@
 # Author: Mikita Sazanovich
 
 import os
-import time
 import multiprocessing
 import numpy as np
 import tensorflow as tf
@@ -149,7 +148,7 @@ def main():
   if args.summarize:
     encoder_a.model.summary()
     encoder_shared.model.summary()
-    controller.seq.summary()
+    controller.model.summary()
 
 
 if __name__ == '__main__':
