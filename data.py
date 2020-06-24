@@ -1,6 +1,57 @@
+# Author: Mikita Sazanovich
+
+import os
+import multiprocessing
+
 import numpy as np
 import tensorflow as tf
 import tf2lib as tl
+import pylib
+
+
+def create_image_dataset(config_datasets, dataset_label, training):
+  datasets_dir = config_datasets['general']['datasets_dir']
+  load_size = config_datasets['general']['load_size']
+  crop_size = config_datasets['general']['crop_size']
+  n_map_threads = multiprocessing.cpu_count()
+
+  def _parse_img(path):
+    img = tf.io.read_file(path)
+    img = tf.image.decode_png(img, 3)  # fix channels to 3
+    return (img, )
+
+  _preprocess_img = img_preprocessing_fn(load_size, crop_size, training)
+
+  def _map_img(*args):
+    return _preprocess_img(*_parse_img(*args))
+
+  config_dataset = config_datasets[dataset_label]
+  paths_image = sorted(pylib.glob(
+      os.path.join(datasets_dir, config_dataset['dataset_name']), config_dataset['filter_images']))
+  paths_count = len(paths_image)
+  image_dataset = tf.data.Dataset.from_tensor_slices(paths_image)
+  image_dataset = image_dataset.map(_map_img, num_parallel_calls=n_map_threads)
+  return image_dataset, paths_count
+
+
+def create_action_dataset(config_datasets, dataset_label):
+  datasets_dir = config_datasets['general']['datasets_dir']
+  n_map_threads = multiprocessing.cpu_count()
+
+  def _parse_npy(path):
+    np_array = np.load(path.numpy())
+    np_array = np_array.astype(np.float32)
+    return (np_array,)
+
+  config_action = config_datasets[dataset_label]
+  paths_action = sorted(pylib.glob(
+      os.path.join(datasets_dir, config_action['dataset_name']), config_action['filter_actions']))
+  paths_count = len(paths_action)
+  action_dataset = tf.data.Dataset.from_tensor_slices(paths_action)
+  action_dataset = action_dataset.map(
+      lambda path: tf.py_function(_parse_npy, inp=[path], Tout=tf.float32),
+      num_parallel_calls=n_map_threads)
+  return action_dataset, paths_count
 
 
 def img_preprocessing_fn(load_size, crop_size, training):

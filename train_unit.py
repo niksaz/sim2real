@@ -1,11 +1,9 @@
 # Author: Mikita Sazanovich
 
 import os
-import multiprocessing
 
 import tensorflow as tf
 import numpy as np
-import pylib
 import imlib
 import tf2lib
 import tqdm
@@ -236,74 +234,34 @@ class Trainer(object):
 
 def create_datasets(config, split):
   config_datasets = config['datasets']
-  datasets_dir = config_datasets['general']['datasets_dir']
-  load_size = config_datasets['general']['load_size']
-  crop_size = config_datasets['general']['crop_size']
   batch_size = config['hyperparameters']['batch_size']
-  n_map_threads = multiprocessing.cpu_count()
 
   if split == 'train':
-    handle_image_a = 'train_a'
-    handle_image_b = 'train_b'
-    # Train control on domain A
-    handle_action = handle_image_a
+    domain_a_label = 'train_a'
+    domain_b_label = 'train_b'
     training = True
   elif split == 'test':
-    handle_image_a = 'test_a'
-    handle_image_b = 'test_b'
-    # Test control on domain A
-    handle_action = handle_image_a
+    domain_a_label = 'test_a'
+    domain_b_label = 'test_b'
     training = False
   else:
-    raise ValueError('split should be either train or test, got ' + split)
+    raise ValueError(f'Split should be either train or test, got: {split}')
 
-  def _parse_img(path):
-    img = tf.io.read_file(path)
-    img = tf.image.decode_png(img, 3)  # fix channels to 3
-    return (img, )
+  image_a_dataset, image_a_length = data.create_image_dataset(config_datasets, domain_a_label, training)
+  image_b_dataset, image_b_length = data.create_image_dataset(config_datasets, domain_b_label, training)
+  action_a_dataset, action_a_length = data.create_action_dataset(config_datasets, domain_a_label)
+  action_b_dataset, action_b_length = data.create_action_dataset(config_datasets, domain_b_label)
 
-  _preprocess_img = data.img_preprocessing_fn(load_size, crop_size, training)
-
-  def _map_img(*args):
-    return _preprocess_img(*_parse_img(*args))
-
-  def _parse_npy(path):
-    np_array = np.load(path.numpy())
-    np_array = np_array.astype(np.float32)
-    return (np_array,)
-
-  # (image A) dataset
-  config_image_a = config_datasets[handle_image_a]
-  paths_image_a = sorted(pylib.glob(
-      os.path.join(datasets_dir, config_image_a['dataset_name']), config_image_a['filter_images']))
-  image_a_dataset = tf.data.Dataset.from_tensor_slices(paths_image_a)
-  image_a_dataset = image_a_dataset.map(_map_img, num_parallel_calls=n_map_threads)
-
-  # (image B) dataset
-  config_image_b = config_datasets[handle_image_b]
-  paths_image_b = sorted(pylib.glob(
-      os.path.join(datasets_dir, config_image_b['dataset_name']), config_image_b['filter_images']))
-  image_b_dataset = tf.data.Dataset.from_tensor_slices(paths_image_b)
-  image_b_dataset = image_b_dataset.map(_map_img, num_parallel_calls=n_map_threads)
-
-  # (action A) dataset
-  config_action = config_datasets[handle_action]
-  paths_action = sorted(pylib.glob(
-      os.path.join(datasets_dir, config_action['dataset_name']), config_action['filter_actions']))
-  actions_dataset = tf.data.Dataset.from_tensor_slices(paths_action)
-  actions_dataset = actions_dataset.map(
-      lambda path: tf.py_function(_parse_npy, inp=[path], Tout=tf.float32),
-      num_parallel_calls=n_map_threads)
-
-  # (image A, image B, action A) dataset
-  zip_dataset = tf.data.Dataset.zip((image_a_dataset, image_b_dataset, actions_dataset))
+  # (image A, action A, image B, action B) dataset
+  # TODO(niksaz): Zip function clips to the smallest length, meaning without repeat some samples are ignored.
+  zip_dataset = tf.data.Dataset.zip((image_a_dataset, action_a_dataset, image_b_dataset, action_b_dataset))
   if training:
     shuffle_buffer_size = max(batch_size * 128, 2048)  # set the minimum buffer size as 2048
     zip_dataset = zip_dataset.shuffle(shuffle_buffer_size, reshuffle_each_iteration=True)
     zip_dataset = zip_dataset.repeat(None)
     len_dataset = None
   else:
-    len_dataset = (min(len(paths_image_a), len(paths_image_b)) + batch_size - 1) // batch_size
+    len_dataset = (min(image_a_length, image_b_length) + batch_size - 1) // batch_size
   zip_dataset = zip_dataset.batch(batch_size, drop_remainder=False)
   return zip_dataset, len_dataset
 
@@ -314,10 +272,10 @@ def train(config, summaries_dir, samples_dir, ab_train_dataset, trainer, checkpo
   dataset_iter = iter(ab_train_dataset)
   for iterations in tqdm.tqdm(range(optimizer_iterations)):
     try:
-      images_a, images_b, actions_a = next(dataset_iter)
+      images_a, actions_a, images_b, actions_b = next(dataset_iter)
     except StopIteration:
       dataset_iter = iter(ab_train_dataset)
-      images_a, images_b, actions_a = next(dataset_iter)
+      images_a, actions_a, images_b, actions_b = next(dataset_iter)
 
     # Training ops
     D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.train_step(images_a, images_b, actions_a)
@@ -400,7 +358,7 @@ def main():
     test_dataset_iter = iter(ab_test_dataset)
     for iterations in tqdm.tqdm(range(ab_test_length)):
       try:
-        images_a, images_b, actions_a = next(test_dataset_iter)
+        images_a, actions_a, images_b, actions_b = next(test_dataset_iter)
       except StopIteration:
         break
 
