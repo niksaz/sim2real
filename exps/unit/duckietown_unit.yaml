@@ -46,18 +46,18 @@ config:
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
     train_a:
-      dataset_name: trainA
+      dataset_name: udem1
       filter_images: '*.png'
       filter_actions: '*.npy'
     train_b:
-      dataset_name: trainB
+      dataset_name: duckietown
       filter_images: '*.png'
       filter_actions: '*.npy'
     test_a:
-      dataset_name: testA
+      dataset_name: udem1
       filter_images: '*.png'
       filter_actions: '*.npy'
     test_b:
-      dataset_name: testB
+      dataset_name: duckietown
       filter_images: '*.png'
       filter_actions: '*.npy'
