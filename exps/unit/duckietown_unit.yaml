@@ -13,7 +13,7 @@ config:
     batch_size: 64
     seed: 30
     optimizer:
-      iterations: 1000
+      iterations: 100
       lr_schedule_class: ConstantSchedule
       lr: 1e-4
       beta_1: 0.5

@@ -277,7 +277,7 @@ def train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir):
 
     # Training ops
     D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.train_step(images_a, images_b, actions_a)
-    train_control_loss_mean.update_state(C_loss_dict['loss'])
+    train_control_loss_mean.update_state(C_loss_dict['loss'].numpy())
 
     # Logging ops
     if (iterations + 1) % config['log_iterations'] == 0:
@@ -303,8 +303,9 @@ def train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir):
 
 def test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_dir):
   training = False
-  test_control_loss = tf.keras.metrics.MeanSquaredError()
-  test_control_loss_mean = tf.keras.metrics.Mean()
+  test_control_loss = tf.keras.losses.MeanSquaredError()
+  test_control_loss_mean_a = tf.keras.metrics.Mean()
+  test_control_loss_mean_b = tf.keras.metrics.Mean()
   test_batches_to_save = 10
   test_dataset_iter = iter(ab_test_dataset)
   for iterations in tqdm.tqdm(range(ab_test_length)):
@@ -320,8 +321,11 @@ def test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_
     G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
     shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
     predictions_a = controller(shared_a, training=training)
-    control_loss = test_control_loss(actions_a, predictions_a)
-    test_control_loss_mean.update_state(control_loss.numpy())
+    control_loss_a = test_control_loss(actions_a, predictions_a)
+    test_control_loss_mean_a.update_state(control_loss_a.numpy())
+    predictions_b = controller(shared_b, training=training)
+    control_loss_b = test_control_loss(actions_b, predictions_b)
+    test_control_loss_mean_b.update_state(control_loss_b.numpy())
 
     # Displaying ops
     if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
@@ -329,7 +333,10 @@ def test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_
       img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
       imlib.imwrite(img, img_filename)
 
-  loss_dict = {'loss_test_mean': test_control_loss_mean.result()}
+  loss_dict = {
+      'loss_test_mean_a': test_control_loss_mean_a.result(),
+      'loss_test_mean_b': test_control_loss_mean_b.result(),
+  }
   tf2lib.summary(loss_dict, step=0, name='controller')
 
 
