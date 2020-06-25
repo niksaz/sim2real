@@ -95,9 +95,9 @@ class Trainer(object):
     self.control_loss_fn = tf.keras.losses.MeanSquaredError()
 
   @tf.function
-  def train_step(self, images_a, images_b, actions_a):
+  def separate_train_step(self, images_a, images_b, actions_a):
     D_loss_dict = self.dis_update(images_a, images_b)
-    G_images, G_loss_dict = self.gen_update(images_a, images_b)
+    G_images, G_loss_dict = self.gen_update(images_a, images_b, actions_a)
     C_loss_dict = self.control_update(images_a, actions_a)
     return D_loss_dict, G_images, G_loss_dict, C_loss_dict
 
@@ -142,10 +142,14 @@ class Trainer(object):
     return D_loss_dict
 
   @tf.function
-  def gen_update(self, images_a, images_b):
+  def gen_update(self, images_a, images_b, actions_a):
     training = True
     with tf.GradientTape() as t:
       x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
+      shared_a, _ = tf.split(shared, num_or_size_splits=2, axis=0)
+      predictions_a = self.controller(shared_a, training=training)
+      control_loss = self.control_loss_fn(actions_a, predictions_a)
+
       x_bab, shared_bab = self.model.encode_a_decode_b(x_ba, training=training)
       x_aba, shared_aba = self.model.encode_b_decode_a(x_ab, training=training)
       out_a = self.model.dis_a(x_ba, training=training)
@@ -164,7 +168,8 @@ class Trainer(object):
       ll_loss_aba = self.ll_loss_criterion_a(y_true=images_a, y_pred=x_aba)
       ll_loss_bab = self.ll_loss_criterion_b(y_true=images_b, y_pred=x_bab)
       loss = (
-          self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
+          self.hyperparameters['control_w'] * control_loss
+          + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
           + self.hyperparameters['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)
           + self.hyperparameters['kl_direct_link_w'] * (enc_loss + enc_loss)
@@ -198,9 +203,10 @@ class Trainer(object):
       encoded_a = self.model.encoder_a(images_a, training=training)
       encoded_shared_a = self.model.encoder_shared(encoded_a, training=training)
       predictions_a = self.controller(encoded_shared_a, training=training)
-      loss = self.control_loss_fn(actions_a, predictions_a)
+      control_loss = self.control_loss_fn(actions_a, predictions_a)
+      loss = self.hyperparameters['control_w'] * control_loss
 
-    control_models = [self.model.encoder_a, self.model.encoder_shared, self.controller]
+    control_models = [self.controller]
     self._compute_and_apply_gradients(control_models, self.control_opt, t, loss)
 
     C_loss_dict = {'loss': loss}
@@ -261,7 +267,7 @@ def train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir):
       images_a, actions_a, images_b, actions_b = next(dataset_iter)
 
     # Training ops
-    D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.train_step(images_a, images_b, actions_a)
+    D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.separate_train_step(images_a, images_b, actions_a)
     train_control_loss_mean.update_state(C_loss_dict['loss'].numpy())
 
     # Logging ops
