@@ -207,9 +207,7 @@ class Discriminator(tf.keras.Model):
     self.model = tf.keras.Sequential(layers=model)
 
   def __call__(self, inputs, **kwargs):
-    out = self.model(inputs, **kwargs)
-    out = tf.reshape(out, [-1])
-    return [out]
+    return self.model(inputs, **kwargs)
 
 
 class Controller(tf.keras.Model):

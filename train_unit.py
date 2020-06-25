@@ -110,25 +110,18 @@ class Trainer(object):
       data_b = tf.concat((images_b, x_ab), axis=0)
       res_a = self.model.dis_a(data_a, training=training)
       res_b = self.model.dis_b(data_b, training=training)
-      for it, (this_a, this_b) in enumerate(zip(res_a, res_b)):
-        out_a = tf.keras.activations.sigmoid(this_a)
-        out_b = tf.keras.activations.sigmoid(this_b)
-        out_true_a, out_fake_a = tf.split(out_a, num_or_size_splits=2, axis=0)
-        out_true_b, out_fake_b = tf.split(out_b, num_or_size_splits=2, axis=0)
-        out_true_n = out_true_a.shape[0]
-        out_fake_n = out_fake_a.shape[0]
-        all1 = tf.ones([out_true_n])
-        all0 = tf.zeros([out_fake_n])
-        ad_true_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_true_a)
-        ad_true_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_true_b)
-        ad_fake_loss_a = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_a)
-        ad_fake_loss_b = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_b)
-        if it == 0:
-          ad_loss_a = ad_true_loss_a + ad_fake_loss_a
-          ad_loss_b = ad_true_loss_b + ad_fake_loss_b
-        else:
-          ad_loss_a += ad_true_loss_a + ad_fake_loss_a
-          ad_loss_b += ad_true_loss_b + ad_fake_loss_b
+      out_a = tf.keras.activations.sigmoid(res_a)
+      out_b = tf.keras.activations.sigmoid(res_b)
+      out_true_a, out_fake_a = tf.split(out_a, num_or_size_splits=2, axis=0)
+      out_true_b, out_fake_b = tf.split(out_b, num_or_size_splits=2, axis=0)
+      all1 = tf.ones_like(out_true_a)
+      all0 = tf.zeros_like(out_true_b)
+      ad_true_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_true_a)
+      ad_true_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_true_b)
+      ad_fake_loss_a = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_a)
+      ad_fake_loss_b = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_b)
+      ad_loss_a = ad_true_loss_a + ad_fake_loss_a
+      ad_loss_b = ad_true_loss_b + ad_fake_loss_b
       loss = self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
 
     dis_models = [self.model.dis_a, self.model.dis_b]
@@ -155,21 +148,13 @@ class Trainer(object):
       x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
       x_bab, shared_bab = self.model.encode_a_decode_b(x_ba, training=training)
       x_aba, shared_aba = self.model.encode_b_decode_a(x_ab, training=training)
-      outs_a = self.model.dis_a(x_ba, training=training)
-      outs_b = self.model.dis_b(x_ab, training=training)
-      for it, (out_a, out_b) in enumerate(zip(outs_a, outs_b)):
-        outputs_a = tf.keras.activations.sigmoid(out_a)
-        outputs_b = tf.keras.activations.sigmoid(out_b)
-        outputs_n = outputs_a.shape[0]
-        all_ones = tf.ones([outputs_n])
-        ad_loss_a_add = self.dis_loss_criterion(y_true=all_ones, y_pred=outputs_a)
-        ad_loss_b_add = self.dis_loss_criterion(y_true=all_ones, y_pred=outputs_b)
-        if it == 0:
-          ad_loss_a = ad_loss_a_add
-          ad_loss_b = ad_loss_b_add
-        else:
-          ad_loss_a += ad_loss_a_add
-          ad_loss_b += ad_loss_b_add
+      out_a = self.model.dis_a(x_ba, training=training)
+      out_b = self.model.dis_b(x_ab, training=training)
+      outputs_a = tf.keras.activations.sigmoid(out_a)
+      outputs_b = tf.keras.activations.sigmoid(out_b)
+      all1 = tf.ones_like(outputs_a)
+      ad_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=outputs_a)
+      ad_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=outputs_b)
 
       enc_loss = _compute_kl(shared)
       enc_bab_loss = _compute_kl(shared_bab)
