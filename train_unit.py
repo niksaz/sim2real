@@ -1,6 +1,7 @@
 # Author: Mikita Sazanovich
 
 import os
+import math
 
 import tensorflow as tf
 import numpy as np
@@ -194,50 +195,36 @@ class Trainer(object):
     optimizer.apply_gradients(zip(grads, variables))
 
 
-def create_datasets(config, split):
+def create_image_action_dataset(config, label, training):
   config_datasets = config['datasets']
   batch_size = config['hyperparameters']['batch_size']
 
-  if split == 'train':
-    domain_a_label = 'train_a'
-    domain_b_label = 'train_b'
-    training = True
-  elif split == 'test':
-    domain_a_label = 'test_a'
-    domain_b_label = 'test_b'
-    training = False
-  else:
-    raise ValueError(f'Split should be either train or test, got: {split}')
+  image_dataset, image_length = data.create_image_dataset(config_datasets, label, training)
+  action_dataset, action_length = data.create_action_dataset(config_datasets, label)
+  if image_length != action_length:
+    raise ValueError(f'The number of images does not match the number of actions for {label}:'
+                     f' {image_length} vs {action_length}.')
 
-  image_a_dataset, image_a_length = data.create_image_dataset(config_datasets, domain_a_label, training)
-  image_b_dataset, image_b_length = data.create_image_dataset(config_datasets, domain_b_label, training)
-  action_a_dataset, action_a_length = data.create_action_dataset(config_datasets, domain_a_label)
-  action_b_dataset, action_b_length = data.create_action_dataset(config_datasets, domain_b_label)
-
-  # (image A, action A, image B, action B) dataset
-  # TODO(niksaz): Zip function clips to the smallest length, meaning without repeat some samples are ignored.
-  zip_dataset = tf.data.Dataset.zip((image_a_dataset, action_a_dataset, image_b_dataset, action_b_dataset))
+  zip_dataset = tf.data.Dataset.zip((image_dataset, action_dataset))
   if training:
     shuffle_buffer_size = max(batch_size * 128, 2048)  # set the minimum buffer size as 2048
     zip_dataset = zip_dataset.shuffle(shuffle_buffer_size, reshuffle_each_iteration=True)
     zip_dataset = zip_dataset.repeat(None)
     len_dataset = None
   else:
-    len_dataset = (min(image_a_length, image_b_length) + batch_size - 1) // batch_size
+    len_dataset = math.ceil(image_length / batch_size)
   zip_dataset = zip_dataset.batch(batch_size, drop_remainder=False)
   return zip_dataset, len_dataset
 
 
-def train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir):
+def train_model(trainer, a_train_dataset, b_train_dataset, config, checkpoint, samples_dir):
   optimizer_iterations = config['hyperparameters']['optimizer']['iterations']
   train_control_loss_mean = tf.keras.metrics.Mean()
-  dataset_iter = iter(ab_train_dataset)
+  a_dataset_iter = iter(a_train_dataset)
+  b_dataset_iter = iter(b_train_dataset)
   for iterations in tqdm.tqdm(range(optimizer_iterations)):
-    try:
-      images_a, actions_a, images_b, actions_b = next(dataset_iter)
-    except StopIteration:
-      dataset_iter = iter(ab_train_dataset)
-      images_a, actions_a, images_b, actions_b = next(dataset_iter)
+    images_a, actions_a = next(a_dataset_iter)
+    images_b, _ = next(b_dataset_iter)
 
     # Training ops
     D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.joint_train_step(images_a, images_b, actions_a)
@@ -265,37 +252,55 @@ def train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir):
       checkpoint.save(iterations + 1)
 
 
-def test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_dir):
+def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_iterations, config, samples_dir):
   training = False
   test_control_loss = tf.keras.losses.MeanSquaredError()
   test_control_loss_mean_a = tf.keras.metrics.Mean()
   test_control_loss_mean_b = tf.keras.metrics.Mean()
-  test_batches_to_save = 10
-  test_dataset_iter = iter(ab_test_dataset)
-  for iterations in tqdm.tqdm(range(ab_test_length)):
+  a_test_iter = iter(a_test_dataset)
+  b_test_iter = iter(b_test_dataset)
+  for iterations in tqdm.tqdm(range(max_iterations)):
     try:
-      images_a, actions_a, images_b, actions_b = next(test_dataset_iter)
+      images_a, actions_a = next(a_test_iter)
     except StopIteration:
-      break
+      images_a, actions_a = None, None
+    try:
+      images_b, actions_b = next(b_test_iter)
+    except StopIteration:
+      images_b, actions_b = None, None
 
-    # Test ops
-    x_aa, x_ba, x_ab, x_bb, shared = unit_model.encode_ab_decode_aabb(images_a, images_b, training=training)
-    x_bab, _ = unit_model.encode_a_decode_b(x_ba, training=training)
-    x_aba, _ = unit_model.encode_b_decode_a(x_ab, training=training)
-    G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
-    shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
-    predictions_a = controller(shared_a, training=training)
-    control_loss_a = test_control_loss(actions_a, predictions_a)
-    test_control_loss_mean_a.update_state(control_loss_a.numpy())
-    predictions_b = controller(shared_b, training=training)
-    control_loss_b = test_control_loss(actions_b, predictions_b)
-    test_control_loss_mean_b.update_state(control_loss_b.numpy())
+    # Inference ops
+    if images_a is not None and images_b is not None:
+      x_aa, x_ba, x_ab, x_bb, shared = unit_model.encode_ab_decode_aabb(images_a, images_b, training=training)
+      x_bab, _ = unit_model.encode_a_decode_b(x_ba, training=training)
+      x_aba, _ = unit_model.encode_b_decode_a(x_ab, training=training)
+      G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
+      shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
+      # Displaying ops
+      if (iterations + 1) % config['image_display_iterations'] == 0:
+        img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
+        img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
+        imlib.imwrite(img, img_filename)
+    elif images_a is not None:
+      encoded_a = unit_model.encoder_a(images_a, training=training)
+      shared_a = unit_model.encoder_shared(encoded_a, training=training)
+      shared_b = None
+    elif images_b is not None:
+      encoded_b = unit_model.encoder_b(images_b, training=training)
+      shared_b = unit_model.encoder_shared(encoded_b, training=training)
+      shared_a = None
+    else:
+      raise AssertionError('There are no images either from A or B during the test.')
 
-    # Displaying ops
-    if (iterations + 1) % (ab_test_length // test_batches_to_save) == 0:
-      img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
-      img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
-      imlib.imwrite(img, img_filename)
+    # Control loss accumulation
+    if shared_a is not None:
+      predictions_a = controller(shared_a, training=training)
+      control_loss_a = test_control_loss(actions_a, predictions_a)
+      test_control_loss_mean_a.update_state(control_loss_a.numpy())
+    if shared_b is not None:
+      predictions_b = controller(shared_b, training=training)
+      control_loss_b = test_control_loss(actions_b, predictions_b)
+      test_control_loss_mean_b.update_state(control_loss_b.numpy())
 
   loss_dict = {
       'loss_test_mean_a': test_control_loss_mean_a.result(),
@@ -312,8 +317,10 @@ def main():
 
   utils.fix_random_seeds(config['hyperparameters']['seed'])
 
-  ab_train_dataset, ab_train_length = create_datasets(config, split='train')
-  ab_test_dataset, ab_test_length = create_datasets(config, split='test')
+  a_train_dataset, _ = create_image_action_dataset(config, 'train_a', training=True)
+  b_train_dataset, _ = create_image_action_dataset(config, 'train_b', training=True)
+  a_test_dataset, a_test_length = create_image_action_dataset(config, 'test_a', training=False)
+  b_test_dataset, b_test_length = create_image_action_dataset(config, 'test_b', training=False)
 
   unit_model = UNITModel(config)
   gen_hyperparameters = config['hyperparameters']['gen']
@@ -348,7 +355,7 @@ def main():
 
   if not args.skip_train:
     with summary_writer.as_default():
-      train_model(trainer, ab_train_dataset, config, checkpoint, samples_dir)
+      train_model(trainer, a_train_dataset, b_train_dataset, config, checkpoint, samples_dir)
 
   if not args.skip_test:
     # Restore from the test checkpoint
@@ -361,7 +368,9 @@ def main():
     test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
     test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
     with summary_writer.as_default():
-      test_model(unit_model, controller, ab_test_dataset, ab_test_length, samples_dir)
+      test_model(
+          unit_model, controller, a_test_dataset, b_test_dataset, max(a_test_length, b_test_length),
+          config, samples_dir)
 
   if args.summarize:
     unit_model.encoder_a.model.summary()
