@@ -223,12 +223,13 @@ def create_image_action_dataset(config, label, training):
   return zip_dataset, len_dataset
 
 
-def train_model(trainer, a_train_dataset, b_train_dataset, config, checkpoint, samples_dir):
+def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
+  (a_train_dataset, a_test_dataset), (b_train_dataset, b_test_dataset) = datasets
   optimizer_iterations = config['hyperparameters']['optimizer']['iterations']
   train_control_loss_mean = tf.keras.metrics.Mean()
   a_dataset_iter = iter(a_train_dataset)
   b_dataset_iter = iter(b_train_dataset)
-  for iterations in tqdm.tqdm(range(optimizer_iterations)):
+  for iterations in tqdm.tqdm(range(1, optimizer_iterations + 1)):
     images_a, actions_a = next(a_dataset_iter)
     images_b, _ = next(b_dataset_iter)
 
@@ -237,25 +238,28 @@ def train_model(trainer, a_train_dataset, b_train_dataset, config, checkpoint, s
     train_control_loss_mean.update_state(C_loss_dict['loss'].numpy())
 
     # Logging ops
-    if (iterations + 1) % config['log_iterations'] == 0:
+    if iterations % config['log_iterations'] == 0:
       C_loss_dict['loss'] = train_control_loss_mean.result()
       train_control_loss_mean.reset_states()
       tf2lib.summary(D_loss_dict, step=iterations, name='discriminator')
       tf2lib.summary(G_loss_dict, step=iterations, name='generator')
       tf2lib.summary(C_loss_dict, step=iterations, name='controller')
     # Displaying ops
-    if (iterations + 1) % config['image_save_iterations'] == 0:
-      img_filename = os.path.join(samples_dir, f'train_{iterations + 1}.jpg')
-    elif (iterations + 1) % config['image_display_iterations'] == 0:
+    if iterations % config['image_save_iterations'] == 0:
+      img_filename = os.path.join(samples_dir, f'train_{iterations}.jpg')
+    elif iterations % config['image_display_iterations'] == 0:
       img_filename = os.path.join(samples_dir, f'train.jpg')
     else:
       img_filename = None
     if img_filename:
       img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
       imlib.imwrite(img, img_filename)
-    # Checkpointing ops
-    if (iterations + 1) % config['checkpoint_save_iterations'] == 0 or iterations + 1 == optimizer_iterations:
-      checkpoint.save(iterations + 1)
+    # Testing and checkpointing ops
+    if iterations % config['checkpoint_save_iterations'] == 0 or iterations == optimizer_iterations:
+      C_loss_dict = test_model(
+          trainer.model, trainer.controller, a_test_dataset, b_test_dataset, test_iterations, config, samples_dir)
+      tf2lib.summary(C_loss_dict, step=iterations, name='controller')
+      checkpoint.save(iterations)
 
 
 def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_iterations, config, samples_dir):
@@ -265,7 +269,7 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
   test_control_loss_mean_b = tf.keras.metrics.Mean()
   a_test_iter = iter(a_test_dataset)
   b_test_iter = iter(b_test_dataset)
-  for iterations in tqdm.tqdm(range(max_iterations)):
+  for iterations in tqdm.tqdm(range(1, max_iterations + 1)):
     try:
       images_a, actions_a = next(a_test_iter)
     except StopIteration:
@@ -283,8 +287,8 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
       shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
       # Displaying ops
-      if (iterations + 1) % config['image_display_iterations'] == 0:
-        img_filename = os.path.join(samples_dir, f'test_{iterations + 1}.jpg')
+      if iterations % config['image_display_iterations'] == 0:
+        img_filename = os.path.join(samples_dir, f'test_{iterations}.jpg')
         img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
         imlib.imwrite(img, img_filename)
     elif images_a is not None:
@@ -308,11 +312,11 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       control_loss_b = test_control_loss(actions_b, predictions_b)
       test_control_loss_mean_b.update_state(control_loss_b.numpy())
 
-  loss_dict = {
-      'loss_test_mean_a': test_control_loss_mean_a.result(),
-      'loss_test_mean_b': test_control_loss_mean_b.result(),
+  C_loss_dict = {
+      'test_loss_a': test_control_loss_mean_a.result(),
+      'test_loss_b': test_control_loss_mean_b.result(),
   }
-  tf2lib.summary(loss_dict, step=0, name='controller')
+  return C_loss_dict
 
 
 def main():
@@ -359,24 +363,10 @@ def main():
     print(e)
   summary_writer = tf.summary.create_file_writer(summaries_dir)
 
-  if not args.skip_train:
-    with summary_writer.as_default():
-      train_model(trainer, a_train_dataset, b_train_dataset, config, checkpoint, samples_dir)
-
-  if not args.skip_test:
-    # Restore from the test checkpoint
-    test_checkpoint_dir = args.test_checkpoinst_dir if args.test_checkpoint_dir else checkpoints_dir
-    test_latest_checkpoint = tf.train.latest_checkpoint(test_checkpoint_dir)
-    print('The checkpoint for test is', test_latest_checkpoint)
-    if not test_latest_checkpoint:
-      raise ValueError('No checkpoint is found for the test stage. Specify it in --test_checkpoint_dir.')
-
-    test_checkpoint = tf.train.Checkpoint(**checkpoint_dict)
-    test_checkpoint.restore(test_latest_checkpoint).assert_existing_objects_matched()
-    with summary_writer.as_default():
-      test_model(
-          unit_model, controller, a_test_dataset, b_test_dataset, max(a_test_length, b_test_length),
-          config, samples_dir)
+  with summary_writer.as_default():
+    datasets = [(a_train_dataset, a_test_dataset), (b_train_dataset, b_test_dataset)]
+    test_iterations = max(a_test_length, b_test_length)
+    main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir)
 
   if args.summarize:
     unit_model.encoder_a.model.summary()
