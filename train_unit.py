@@ -109,7 +109,7 @@ class Trainer(object):
       out_true_a, out_fake_a = tf.split(out_a, num_or_size_splits=2, axis=0)
       out_true_b, out_fake_b = tf.split(out_b, num_or_size_splits=2, axis=0)
       all1 = tf.ones_like(out_true_a)
-      all0 = tf.zeros_like(out_true_b)
+      all0 = tf.zeros_like(out_true_a)
       ad_true_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_true_a)
       ad_true_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_true_b)
       ad_fake_loss_a = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_a)
@@ -118,9 +118,6 @@ class Trainer(object):
       ad_loss_b = ad_true_loss_b + ad_fake_loss_b
       dis_loss = self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
 
-      shared_a, _ = tf.split(shared, num_or_size_splits=2, axis=0)
-      predictions_a = self.controller(shared_a, training=training)
-      control_loss_a = self.control_loss_fn(actions_a, predictions_a)
       x_bab, shared_bab = self.model.encode_a_decode_b(x_ba, training=training)
       x_aba, shared_aba = self.model.encode_b_decode_a(x_ab, training=training)
       ad_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_a)
@@ -132,15 +129,20 @@ class Trainer(object):
       ll_loss_b = self.ll_loss_criterion_b(y_true=images_b, y_pred=x_bb)
       ll_loss_aba = self.ll_loss_criterion_a(y_true=images_a, y_pred=x_aba)
       ll_loss_bab = self.ll_loss_criterion_b(y_true=images_b, y_pred=x_bab)
+      shared_a, _ = tf.split(shared, num_or_size_splits=2, axis=0)
+      predictions_a = self.controller(shared_a, training=training)
+      control_loss_a = self.control_loss_fn(actions_a, predictions_a)
+      predictions_aba = self.controller(shared_aba, training=training)
+      control_loss_aba = self.control_loss_fn(actions_a, predictions_aba)
       gen_loss = (
-          self.hyperparameters['control_w'] * control_loss_a
+          self.hyperparameters['control_w'] * (control_loss_a + control_loss_aba)
           + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
           + self.hyperparameters['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)
           + self.hyperparameters['kl_direct_link_w'] * (enc_loss + enc_loss)
           + self.hyperparameters['kl_cycle_link_w'] * (enc_bab_loss + enc_aba_loss))
 
-      control_loss = self.hyperparameters['control_w'] * control_loss_a
+      control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_aba)
 
     dis_models = [self.model.dis_a, self.model.dis_b]
     dis_variables = [v for model in dis_models for v in model.trainable_variables]
@@ -183,7 +185,11 @@ class Trainer(object):
         'll_loss_bab': ll_loss_bab,
         'loss': gen_loss,
     }
-    C_loss_dict = {'loss': control_loss}
+    C_loss_dict = {
+        'loss_a': control_loss_a,
+        'loss_aba': control_loss_aba,
+        'loss': control_loss,
+    }
     return D_loss_dict, G_images, G_loss_dict, C_loss_dict
 
   @staticmethod
