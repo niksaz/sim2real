@@ -90,10 +90,10 @@ class Trainer(object):
     self.gen_opt = optimization.create_optimizer_from_params(hyperparameters['gen']['optimizer'])
     self.dis_opt = optimization.create_optimizer_from_params(hyperparameters['dis']['optimizer'])
     self.control_opt = optimization.create_optimizer_from_params(hyperparameters['control']['optimizer'])
-    self.dis_loss_criterion = tf.keras.losses.BinaryCrossentropy()
-    self.ll_loss_criterion_a = tf.keras.losses.MeanAbsoluteError()
-    self.ll_loss_criterion_b = tf.keras.losses.MeanAbsoluteError()
-    self.control_loss_fn = tf.keras.losses.MeanSquaredError()
+    self.dis_loss_criterion = utils.get_loss_fn('bce')
+    self.ll_loss_criterion_a = utils.get_loss_fn('mae')
+    self.ll_loss_criterion_b = utils.get_loss_fn('mae')
+    self.control_loss_criterion = utils.get_loss_fn(hyperparameters['control']['loss'])
 
   @tf.function
   def joint_train_step(self, images_a, images_b, actions_a):
@@ -131,9 +131,9 @@ class Trainer(object):
       ll_loss_bab = self.ll_loss_criterion_b(y_true=images_b, y_pred=x_bab)
       shared_a, _ = tf.split(shared, num_or_size_splits=2, axis=0)
       predictions_a = self.controller(shared_a, training=training)
-      control_loss_a = self.control_loss_fn(actions_a, predictions_a)
+      control_loss_a = self.control_loss_criterion(actions_a, predictions_a)
       predictions_aba = self.controller(shared_aba, training=training)
-      control_loss_aba = self.control_loss_fn(actions_a, predictions_aba)
+      control_loss_aba = self.control_loss_criterion(actions_a, predictions_aba)
       gen_loss = (
           self.hyperparameters['control_w'] * (control_loss_a + control_loss_aba)
           + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
@@ -185,10 +185,11 @@ class Trainer(object):
         'll_loss_bab': ll_loss_bab,
         'loss': gen_loss,
     }
+    control_loss_name = self.hyperparameters['control']['loss']
     C_loss_dict = {
-        'loss_a': control_loss_a,
-        'loss_aba': control_loss_aba,
-        'loss': control_loss,
+        f'train_{control_loss_name}_loss_a': control_loss_a,
+        f'train_{control_loss_name}_loss_aba': control_loss_aba,
+        f'train_{control_loss_name}_loss': control_loss,
     }
     return D_loss_dict, G_images, G_loss_dict, C_loss_dict
 
@@ -226,7 +227,7 @@ def create_image_action_dataset(config, label, training):
 def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
   (a_train_dataset, a_test_dataset), (b_train_dataset, b_test_dataset) = datasets
   optimizer_iterations = config['hyperparameters']['iterations']
-  train_control_loss_mean = tf.keras.metrics.Mean()
+  c_loss_mean_dict = {}
   a_dataset_iter = iter(a_train_dataset)
   b_dataset_iter = iter(b_train_dataset)
   for iterations in tqdm.tqdm(range(1, optimizer_iterations + 1)):
@@ -235,12 +236,16 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
 
     # Training ops
     D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.joint_train_step(images_a, images_b, actions_a)
-    train_control_loss_mean.update_state(C_loss_dict['loss'].numpy())
+    for c_loss_label, c_loss in C_loss_dict.items():
+      if c_loss_label not in c_loss_mean_dict:
+        c_loss_mean_dict[c_loss_label] = tf.keras.metrics.Mean()
+      c_loss_mean_dict[c_loss_label].update_state(c_loss.numpy())
 
     # Logging ops
     if iterations % config['log_iterations'] == 0:
-      C_loss_dict['loss'] = train_control_loss_mean.result()
-      train_control_loss_mean.reset_states()
+      for c_loss_label, c_loss_mean in c_loss_mean_dict.items():
+        C_loss_dict[c_loss_label] = c_loss_mean.result()
+        c_loss_mean.reset_states()
       tf2lib.summary(D_loss_dict, step=iterations, name='discriminator')
       tf2lib.summary(G_loss_dict, step=iterations, name='generator')
       tf2lib.summary(C_loss_dict, step=iterations, name='controller')
@@ -264,9 +269,12 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
 
 def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_iterations, config, samples_dir):
   training = False
-  test_control_loss = tf.keras.losses.MeanSquaredError()
-  test_control_loss_mean_a = tf.keras.metrics.Mean()
-  test_control_loss_mean_b = tf.keras.metrics.Mean()
+  mae_loss_fn = utils.get_loss_fn('mae')
+  mae_loss_mean_a = tf.keras.metrics.Mean()
+  mae_loss_mean_b = tf.keras.metrics.Mean()
+  mse_loss_fn = utils.get_loss_fn('mse')
+  mse_loss_mean_a = tf.keras.metrics.Mean()
+  mse_loss_mean_b = tf.keras.metrics.Mean()
   a_test_iter = iter(a_test_dataset)
   b_test_iter = iter(b_test_dataset)
   for iterations in tqdm.tqdm(range(1, max_iterations + 1)):
@@ -303,18 +311,22 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       raise AssertionError('There are no images either from A or B during the test.')
 
     # Control loss accumulation
-    if shared_a is not None:
-      predictions_a = controller(shared_a, training=training)
-      control_loss_a = test_control_loss(actions_a, predictions_a)
-      test_control_loss_mean_a.update_state(control_loss_a.numpy())
-    if shared_b is not None:
-      predictions_b = controller(shared_b, training=training)
-      control_loss_b = test_control_loss(actions_b, predictions_b)
-      test_control_loss_mean_b.update_state(control_loss_b.numpy())
+    for shared_x, actions_x, mae_loss_mean_x, mse_loss_mean_x in [
+        (shared_a, actions_a, mae_loss_mean_a, mse_loss_mean_a),
+        (shared_b, actions_b, mae_loss_mean_b, mse_loss_mean_b)]:
+      if shared_x is None:
+        continue
+      predictions_x = controller(shared_x, training=training)
+      mae_loss = mae_loss_fn(actions_x, predictions_x)
+      mae_loss_mean_x.update_state(mae_loss.numpy())
+      mse_loss = mse_loss_fn(actions_x, predictions_x)
+      mse_loss_mean_x.update_state(mse_loss.numpy())
 
   C_loss_dict = {
-      'test_loss_a': test_control_loss_mean_a.result(),
-      'test_loss_b': test_control_loss_mean_b.result(),
+      'test_mae_loss_a': mae_loss_mean_a.result(),
+      'test_mae_loss_b': mae_loss_mean_b.result(),
+      'test_mse_loss_a': mse_loss_mean_a.result(),
+      'test_mse_loss_b': mse_loss_mean_b.result(),
   }
   return C_loss_dict
 
@@ -339,8 +351,9 @@ def main():
   controller = layers.Controller(z_ch, control_hyperparameters, 2)
   trainer = Trainer(unit_model, controller, config['hyperparameters'])
 
-  samples_dir, summaries_dir, checkpoints_dir = utils.create_output_dirs(
+  output_dir, (samples_dir, summaries_dir, checkpoints_dir) = utils.create_output_dirs(
       args.output_dir_base, 'unit', args.tag, ['samples', 'summaries', 'checkpoints'])
+  configuration.dump_config(config, os.path.join(output_dir, 'config.yaml'))
 
   checkpoint_dict = {
       'encoder_a': unit_model.encoder_a,

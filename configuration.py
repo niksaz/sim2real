@@ -21,3 +21,9 @@ def load_config(path):
   with open(path, 'r') as stream:
     doc = yaml.load(stream)
     return doc['config']
+
+
+def dump_config(config, path):
+  doc = {'config': config}
+  with open(path, 'w') as stream:
+    yaml.dump(doc, stream)

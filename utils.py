@@ -18,9 +18,18 @@ def create_output_dirs(output_dir_base, model, tag, dirs_to_create):
     dir_path = os.path.join(output_dir, dir_to_create)
     os.makedirs(dir_path, exist_ok=False)
     dir_paths.append(dir_path)
-  return dir_paths
+  return output_dir, dir_paths
 
 
 def fix_random_seeds(seed):
   tf.random.set_seed(seed)
   np.random.seed(seed)
+
+
+def get_loss_fn(loss_name):
+  if loss_name == 'mse':
+    return tf.keras.losses.MeanSquaredError()
+  elif loss_name == 'mae':
+    return tf.keras.losses.MeanAbsoluteError()
+  elif loss_name == 'bce':
+    return tf.keras.losses.BinaryCrossentropy()

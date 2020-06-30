@@ -138,7 +138,7 @@ def main():
   control_hyperparameters = config['hyperparameters']['control']
   controller = layers.Controller(z_ch, control_hyperparameters, 2)
 
-  summaries_dir, = utils.create_output_dirs(args.output_dir_base, 'baseline', args.tag, ['summaries'])
+  _, (summaries_dir,) = utils.create_output_dirs(args.output_dir_base, 'baseline', args.tag, ['summaries'])
 
   writer = tf.summary.create_file_writer(summaries_dir)
   loss_fn = tf.keras.losses.MeanSquaredError()

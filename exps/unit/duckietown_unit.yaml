@@ -45,6 +45,7 @@ config:
     control:
       n_layer: 3
       fc_layers: [16]
+      loss: mae
       optimizer:
         lr_schedule_class: ConstantSchedule
         lr: 1e-2
