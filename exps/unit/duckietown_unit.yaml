@@ -10,7 +10,7 @@ config:
     ll_cycle_link_w: 100
     kl_cycle_link_w: 0.1
     gan_w: 10
-    control_w: 1.0
+    control_w: 1
     batch_size: 64
     seed: 30
     iterations: 1000
