@@ -64,16 +64,22 @@ class ConstantSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     return learning_rate
 
 
-def create_optimizer_from_params(optimizer_hyperparameters):
-  lr_schedule_class = globals()[optimizer_hyperparameters['lr_schedule_class']]
-  lr_schedule = lr_schedule_class(optimizer_hyperparameters)
-  adam_params = {
-      'learning_rate': lr_schedule,
-      'beta_1': float(optimizer_hyperparameters['beta_1']),
-      'beta_2': float(optimizer_hyperparameters['beta_2']),
-      'epsilon': float(optimizer_hyperparameters['epsilon']),
-  }
-  if 'decay' in optimizer_hyperparameters:
-    adam_params['decay'] = optimizer_hyperparameters['decay']
-  optimizer = tf.keras.optimizers.Adam(**adam_params)
+def create_optimizer_from_params(params):
+  lr_schedule_class = globals()[params['lr_schedule_class']]
+  lr_schedule = lr_schedule_class(params)
+  method = params['method']
+  if method == 'adam':
+    adam_params = {
+        'learning_rate': lr_schedule,
+        'beta_1': float(params['beta_1']),
+        'beta_2': float(params['beta_2']),
+    }
+    optimizer = tf.keras.optimizers.Adam(**adam_params)
+  elif method == 'sgd':
+    sgd_params = {
+        'learning_rate': lr_schedule,
+    }
+    optimizer = tf.keras.optimizers.SGD(**sgd_params)
+  else:
+    raise ValueError(f'Unknown optimizer method: {method}. Supported options are adam and sgd.')
   return optimizer

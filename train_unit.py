@@ -87,9 +87,9 @@ class Trainer(object):
     self.model = model
     self.controller = controller
     self.hyperparameters = hyperparameters
-    self.gen_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
-    self.dis_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
-    self.control_opt = optimization.create_optimizer_from_params(hyperparameters['optimizer'])
+    self.gen_opt = optimization.create_optimizer_from_params(hyperparameters['gen']['optimizer'])
+    self.dis_opt = optimization.create_optimizer_from_params(hyperparameters['dis']['optimizer'])
+    self.control_opt = optimization.create_optimizer_from_params(hyperparameters['control']['optimizer'])
     self.dis_loss_criterion = tf.keras.losses.BinaryCrossentropy()
     self.ll_loss_criterion_a = tf.keras.losses.MeanAbsoluteError()
     self.ll_loss_criterion_b = tf.keras.losses.MeanAbsoluteError()
@@ -225,7 +225,7 @@ def create_image_action_dataset(config, label, training):
 
 def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
   (a_train_dataset, a_test_dataset), (b_train_dataset, b_test_dataset) = datasets
-  optimizer_iterations = config['hyperparameters']['optimizer']['iterations']
+  optimizer_iterations = config['hyperparameters']['iterations']
   train_control_loss_mean = tf.keras.metrics.Mean()
   a_dataset_iter = iter(a_train_dataset)
   b_dataset_iter = iter(b_train_dataset)

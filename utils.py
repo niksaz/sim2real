@@ -8,8 +8,10 @@ import numpy as np
 
 
 def create_output_dirs(output_dir_base, model, tag, dirs_to_create):
+  model_dir = os.path.join(output_dir_base, model)
+  os.makedirs(model_dir, exist_ok=True)
   output_dir_name = f'{tag}-{time.strftime("%Y%m%d%H%M%S")}'
-  output_dir = os.path.join(output_dir_base, model, output_dir_name)
+  output_dir = os.path.join(model_dir, output_dir_name)
   os.makedirs(output_dir, exist_ok=False)
   dir_paths = []
   for dir_to_create in dirs_to_create:
