@@ -55,22 +55,21 @@ def create_action_dataset(config_datasets, dataset_label):
 
 
 def img_preprocessing_fn(load_size, crop_size, training):
-  if training:
-    @tf.function
-    def _map_fn(img):  # preprocessing
-      # img = tf.image.random_flip_left_right(img)
+  @tf.function
+  def _map_fn(img):  # preprocessing
+    if tf.shape(img)[1] / tf.shape(img)[0] == 4 / 3:
+      # Remove the top third of the image, since it is an unprocessed image.
+      img = img[tf.shape(img)[0] // 3:, :, :]
+
+    if training:
       img = tf.image.resize(img, load_size)
       img = tf.image.random_crop(img, crop_size + [tf.shape(img)[-1]])
-      img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
-      img = img * 2 - 1  # or img = tf.image.rgb_to_yuv(img)
-      return img
-  else:
-    @tf.function
-    def _map_fn(img):  # preprocessing
+    else:
       img = tf.image.resize(img, crop_size)  # or img = tf.image.resize(img, load_size); img = tl.center_crop(img, crop_size)
-      img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
-      img = img * 2 - 1  # or img = tf.image.rgb_to_yuv(img)
-      return img
+
+    img = tf.clip_by_value(img, 0, 255) / 255.0  # or img = tl.minmax_norm(img)
+    img = img * 2 - 1  # or img = tf.image.rgb_to_yuv(img)
+    return img
   return _map_fn
 
 
