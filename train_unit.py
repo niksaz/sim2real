@@ -60,8 +60,8 @@ class UNITModel(object):
     decoded_shared = self.decoder_shared(encoded_shared, training=training)
     decoded_a = self.decoder_a(decoded_shared, training=training)
     decoded_b = self.decoder_b(decoded_shared, training=training)
-    x_aa, x_ba = tf.split(decoded_a, num_or_size_splits=2, axis=0)
-    x_ab, x_bb = tf.split(decoded_b, num_or_size_splits=2, axis=0)
+    x_aa, x_ba = tf.split(decoded_a, num_or_size_splits=[len(x_a), len(x_b)], axis=0)
+    x_ab, x_bb = tf.split(decoded_b, num_or_size_splits=[len(x_a), len(x_b)], axis=0)
     return x_aa, x_ba, x_ab, x_bb, encoded_shared
 
   @tf.function
@@ -91,8 +91,8 @@ class Trainer(object):
     self.dis_opt = optimization.create_optimizer_from_params(hyperparameters['dis']['optimizer'])
     self.control_opt = optimization.create_optimizer_from_params(hyperparameters['control']['optimizer'])
     self.dis_loss_criterion = utils.get_loss_fn('bce')
-    self.ll_loss_criterion_a = utils.get_loss_fn('mae')
-    self.ll_loss_criterion_b = utils.get_loss_fn('mae')
+    self.ll_loss_criterion = utils.get_loss_fn('mae')
+    self.z_recon_loss_criterion = utils.get_loss_fn('mae')
     self.control_loss_criterion = utils.get_loss_fn(hyperparameters['control']['loss'])
 
   @tf.function
@@ -106,8 +106,8 @@ class Trainer(object):
       res_b = self.model.dis_b(data_b, training=training)
       out_a = tf.keras.activations.sigmoid(res_a)
       out_b = tf.keras.activations.sigmoid(res_b)
-      out_true_a, out_fake_a = tf.split(out_a, num_or_size_splits=2, axis=0)
-      out_true_b, out_fake_b = tf.split(out_b, num_or_size_splits=2, axis=0)
+      out_true_a, out_fake_a = tf.split(out_a, num_or_size_splits=[len(images_a), len(x_ba)], axis=0)
+      out_true_b, out_fake_b = tf.split(out_b, num_or_size_splits=[len(images_b), len(x_ab)], axis=0)
       all1 = tf.ones_like(out_true_a)
       all0 = tf.zeros_like(out_true_a)
       ad_true_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_true_a)
@@ -122,26 +122,29 @@ class Trainer(object):
       x_aba, shared_ab = self.model.encode_b_decode_a(x_ab, training=training)
       ad_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_a)
       ad_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_b)
-      ll_loss_a = self.ll_loss_criterion_a(y_true=images_a, y_pred=x_aa)
-      ll_loss_b = self.ll_loss_criterion_b(y_true=images_b, y_pred=x_bb)
-      ll_loss_aba = self.ll_loss_criterion_a(y_true=images_a, y_pred=x_aba)
-      ll_loss_bab = self.ll_loss_criterion_b(y_true=images_b, y_pred=x_bab)
-      shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
+      ll_loss_a = self.ll_loss_criterion(y_true=images_a, y_pred=x_aa)
+      ll_loss_b = self.ll_loss_criterion(y_true=images_b, y_pred=x_bb)
+      ll_loss_aba = self.ll_loss_criterion(y_true=images_a, y_pred=x_aba)
+      ll_loss_bab = self.ll_loss_criterion(y_true=images_b, y_pred=x_bab)
+      shared_a, shared_b = tf.split(shared, num_or_size_splits=[len(images_a), len(images_b)], axis=0)
       kl_direct_a_loss = _compute_kl(shared_a)
       kl_direct_b_loss = _compute_kl(shared_b)
       kl_cycle_ab_loss = _compute_kl(shared_ab)
       kl_cycle_ba_loss = _compute_kl(shared_ba)
+      z_recon_loss_a = self.z_recon_loss_criterion(shared_a, shared_ab)
+      z_recon_loss_b = self.z_recon_loss_criterion(shared_b, shared_ba)
       predictions_a = self.controller(shared_a, training=training)
       control_loss_a = self.control_loss_criterion(actions_a, predictions_a)
       predictions_ab = self.controller(shared_ab, training=training)
       control_loss_ab = self.control_loss_criterion(actions_a, predictions_ab)
       gen_loss = (
           self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
-          + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
           + self.hyperparameters['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)
           + self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
-          + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss))
+          + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
+          + self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
+          + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b))
 
       control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
 
@@ -295,7 +298,7 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       x_bab, _ = unit_model.encode_a_decode_b(x_ba, training=training)
       x_aba, _ = unit_model.encode_b_decode_a(x_ab, training=training)
       G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
-      shared_a, shared_b = tf.split(shared, num_or_size_splits=2, axis=0)
+      shared_a, shared_b = tf.split(shared, num_or_size_splits=[len(images_a), len(images_b)], axis=0)
       # Displaying ops
       if iterations % config['image_display_iterations'] == 0:
         img_filename = os.path.join(samples_dir, f'test_{iterations}.jpg')

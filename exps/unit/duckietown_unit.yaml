@@ -9,11 +9,12 @@ config:
     kl_direct_link_w: 0.1
     ll_cycle_link_w: 100
     kl_cycle_link_w: 0.1
+    z_recon_w: 0.0
     gan_w: 10
-    control_w: 1
+    control_w: 1.0
     batch_size: 64
     seed: 30
-    iterations: 1000
+    iterations: 10000
     gen:
       ch: 64
       input_dim: 3
@@ -45,29 +46,29 @@ config:
     control:
       n_layer: 3
       fc_layers: [16]
-      loss: mae
+      loss: mse
       optimizer:
         lr_schedule_class: ConstantSchedule
         lr: 1e-2
         method: sgd
   datasets:
     general:
-      datasets_dir: datasets/duckiebot
+      datasets_dir: /home/zerogerc/msazanovich/duckietown-data
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
     train_a:
-      dataset_name: udem1
-      filter_images: '*.png'
-      filter_actions: '*.npy'
-    train_b:
-      dataset_name: duckietown
+      dataset_name: episode_1438/loop_empty_collect
       filter_images: '*.png'
       filter_actions: '*.npy'
     test_a:
-      dataset_name: udem1
+      dataset_name: episode_1438/loop_empty_collect
+      filter_images: '*.png'
+      filter_actions: '*.npy'
+    train_b:
+      dataset_name: logs/duckietown
       filter_images: '*.png'
       filter_actions: '*.npy'
     test_b:
-      dataset_name: duckietown
+      dataset_name: logs/duckietown
       filter_images: '*.png'
       filter_actions: '*.npy'
