@@ -2,6 +2,7 @@
 
 import os
 import math
+import pickle
 
 import tensorflow as tf
 import numpy as np
@@ -207,26 +208,47 @@ class Trainer(object):
     optimizer.apply_gradients(zip(grads, variables))
 
 
-def create_image_action_dataset(config, label, training):
+def compile_sample_paths(dataset_path, descriptor_filename):
+  assert descriptor_filename.endswith('.pickle')
+  descriptor_path = os.path.join(dataset_path, descriptor_filename)
+  with open(descriptor_path, 'rb') as fin:
+    sample_files = pickle.load(fin)
+  sample_paths = [
+      (os.path.join(dataset_path, ifile), os.path.join(dataset_path, afile))
+      for ifile, afile in sample_files]
+  return sample_paths
+
+
+def create_image_action_dataset(config, label):
   config_datasets = config['datasets']
   batch_size = config['hyperparameters']['batch_size']
+  dataset_path = os.path.join(
+      config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
+  train_paths = compile_sample_paths(dataset_path, 'train_files.pickle')
+  test_paths = compile_sample_paths(dataset_path, 'test_files.pickle')
+  print(f'There are {len(train_paths)} train and {len(test_paths)} test samples in the dataset {label}.')
+  load_size = config_datasets['general']['load_size']
+  crop_size = config_datasets['general']['crop_size']
 
-  image_dataset, image_length = data.create_image_dataset(config_datasets, label, training)
-  action_dataset, action_length = data.create_action_dataset(config_datasets, label)
-  if image_length != action_length:
-    raise ValueError(f'The number of images does not match the number of actions for {label}:'
-                     f' {image_length} vs {action_length}.')
+  train_image_dataset = data.create_image_dataset(
+      [ipath for ipath, _ in train_paths], load_size, crop_size, training=True)
+  train_action_dataset = data.create_action_dataset(
+      [apath for _, apath in train_paths])
+  train_dataset = tf.data.Dataset.zip((train_image_dataset, train_action_dataset))
+  shuffle_buffer_size = max(batch_size * 128, 2048)
+  train_dataset = train_dataset.shuffle(shuffle_buffer_size, reshuffle_each_iteration=True)
+  train_dataset = train_dataset.repeat(None)
+  train_dataset = train_dataset.batch(batch_size, drop_remainder=False)
 
-  zip_dataset = tf.data.Dataset.zip((image_dataset, action_dataset))
-  if training:
-    shuffle_buffer_size = max(batch_size * 128, 2048)  # set the minimum buffer size as 2048
-    zip_dataset = zip_dataset.shuffle(shuffle_buffer_size, reshuffle_each_iteration=True)
-    zip_dataset = zip_dataset.repeat(None)
-    len_dataset = None
-  else:
-    len_dataset = math.ceil(image_length / batch_size)
-  zip_dataset = zip_dataset.batch(batch_size, drop_remainder=False)
-  return zip_dataset, len_dataset
+  test_image_dataset = data.create_image_dataset(
+      [ipath for ipath, _ in test_paths], load_size, crop_size, training=False)
+  test_action_dataset = data.create_action_dataset(
+      [apath for _, apath in test_paths])
+  test_dataset = tf.data.Dataset.zip((test_image_dataset, test_action_dataset))
+  test_dataset = test_dataset.batch(batch_size, drop_remainder=False)
+  test_dataset_len = math.ceil(len(test_paths) / batch_size)
+
+  return train_dataset, test_dataset, test_dataset_len
 
 
 def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
@@ -344,10 +366,8 @@ def main():
 
   utils.fix_random_seeds(config['hyperparameters']['seed'])
 
-  a_train_dataset, _ = create_image_action_dataset(config, 'train_a', training=True)
-  b_train_dataset, _ = create_image_action_dataset(config, 'train_b', training=True)
-  a_test_dataset, a_test_length = create_image_action_dataset(config, 'test_a', training=False)
-  b_test_dataset, b_test_length = create_image_action_dataset(config, 'test_b', training=False)
+  a_train_dataset, a_test_dataset, a_test_length = create_image_action_dataset(config, 'domain_a')
+  b_train_dataset, b_test_dataset, b_test_length = create_image_action_dataset(config, 'domain_b')
 
   unit_model = UNITModel(config)
   gen_hyperparameters = config['hyperparameters']['gen']

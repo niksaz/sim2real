@@ -56,19 +56,7 @@ config:
       datasets_dir: /home/zerogerc/msazanovich/duckietown-data
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
-    train_a:
-      dataset_name: episode_1438/loop_empty_collect
-      filter_images: '*.png'
-      filter_actions: '*.npy'
-    test_a:
-      dataset_name: episode_1438/loop_empty_collect
-      filter_images: '*.png'
-      filter_actions: '*.npy'
-    train_b:
-      dataset_name: logs/duckietown
-      filter_images: '*.png'
-      filter_actions: '*.npy'
-    test_b:
-      dataset_name: logs/duckietown
-      filter_images: '*.png'
-      filter_actions: '*.npy'
+    domain_a:
+      dataset_path: episode_1438/loop_empty_collect
+    domain_b:
+      dataset_path: logs/duckietown
