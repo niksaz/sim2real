@@ -315,17 +315,13 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       images_b, actions_b = None, None
 
     # Inference ops
+    G_images = None
     if images_a is not None and images_b is not None:
       x_aa, x_ba, x_ab, x_bb, shared = unit_model.encode_ab_decode_aabb(images_a, images_b, training=training)
       x_bab, _ = unit_model.encode_a_decode_b(x_ba, training=training)
       x_aba, _ = unit_model.encode_b_decode_a(x_ab, training=training)
       G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
       shared_a, shared_b = tf.split(shared, num_or_size_splits=[len(images_a), len(images_b)], axis=0)
-      # Displaying ops
-      if iterations % config['image_display_iterations'] == 0:
-        img_filename = os.path.join(samples_dir, f'test_{iterations}.jpg')
-        img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
-        imlib.imwrite(img, img_filename)
     elif images_a is not None:
       encoded_a = unit_model.encoder_a(images_a, training=training)
       shared_a = unit_model.encoder_shared(encoded_a, training=training)
@@ -336,6 +332,19 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       shared_a = None
     else:
       raise AssertionError('There are no images either from A or B during the test.')
+
+    # Displaying ops
+    if iterations % (max_iterations // 10) == 0:
+      img_filename = os.path.join(samples_dir, f'test_{iterations}.jpg')
+      images = []
+      if images_a is not None:
+        images.append(images_a)
+      if images_b is not None:
+        images.append(images_b)
+      if G_images is not None:
+        images.extend(G_images)
+      img = imlib.immerge(np.concatenate(images, axis=0), n_rows=len(images))
+      imlib.imwrite(img, img_filename)
 
     # Control loss accumulation
     for shared_x, actions_x, mae_loss_mean_x, mse_loss_mean_x in [
