@@ -113,7 +113,7 @@ def train_model(encoder_a, encoder_shared, controller, loss_fn, config):
       train_mean_loss.reset_states()
 
     # log the test loss
-    if (iterations + 1) % config['checkpoint_save_iterations'] == 0 or iterations + 1 == optimizer_iterations:
+    if (iterations + 1) % config['test_every_iterations'] == 0 or iterations + 1 == optimizer_iterations:
       test_iter = iter(test_dataset)
       for _ in range(test_dataset_length):
         images, actions = next(test_iter)

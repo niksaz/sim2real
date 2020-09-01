@@ -2,7 +2,7 @@ config:
   log_iterations: 100 # How often do you want to log the training stats
   image_display_iterations: 250 # How often do you want to display output images during training
   image_save_iterations: 2500 # How often do you want to save output images during training
-  checkpoint_save_iterations: 1000 # How often do you want to save trained models
+  test_every_iterations: 1000 # How often do you want to test trained models
   hyperparameters:
     trainer: Trainer
     ll_direct_link_w: 100

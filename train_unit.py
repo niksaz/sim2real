@@ -288,7 +288,7 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
       img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
       imlib.imwrite(img, img_filename)
     # Testing and checkpointing ops
-    if iterations % config['checkpoint_save_iterations'] == 0 or iterations == optimizer_iterations:
+    if iterations % config['test_every_iterations'] == 0 or iterations == optimizer_iterations:
       C_loss_dict = test_model(
           trainer.model, trainer.controller, a_test_dataset, b_test_dataset, test_iterations, samples_dir)
       tf2lib.summary(C_loss_dict, step=iterations, name='controller')
@@ -411,7 +411,7 @@ def main():
       'dis_opt': trainer.dis_opt,
       'control_opt': trainer.control_opt,
   }
-  checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=5)
+  checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=1)
   try:  # Restore checkpoint
     checkpoint.restore().assert_existing_objects_matched()
   except Exception as e:
