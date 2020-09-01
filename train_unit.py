@@ -13,6 +13,7 @@ import tqdm
 import configuration
 import data
 import layers
+import metrics
 import optimization
 import utils
 
@@ -289,19 +290,21 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
     # Testing and checkpointing ops
     if iterations % config['checkpoint_save_iterations'] == 0 or iterations == optimizer_iterations:
       C_loss_dict = test_model(
-          trainer.model, trainer.controller, a_test_dataset, b_test_dataset, test_iterations, config, samples_dir)
+          trainer.model, trainer.controller, a_test_dataset, b_test_dataset, test_iterations, samples_dir)
       tf2lib.summary(C_loss_dict, step=iterations, name='controller')
       checkpoint.save(iterations)
 
 
-def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_iterations, config, samples_dir):
+def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_iterations, samples_dir):
   training = False
-  mae_loss_fn = utils.get_loss_fn('mae')
-  mae_loss_mean_a = tf.keras.metrics.Mean()
-  mae_loss_mean_b = tf.keras.metrics.Mean()
-  mse_loss_fn = utils.get_loss_fn('mse')
-  mse_loss_mean_a = tf.keras.metrics.Mean()
-  mse_loss_mean_b = tf.keras.metrics.Mean()
+  mae_metric_a = metrics.MAEMetric()
+  mae_metric_b = metrics.MAEMetric()
+  mse_metric_a = metrics.MSEMetric()
+  mse_metric_b = metrics.MSEMetric()
+  bmae_metric_a = metrics.BMAEMetric()
+  bmae_metric_b = metrics.BMAEMetric()
+  bmse_metric_a = metrics.BMSEMetric()
+  bmse_metric_b = metrics.BMSEMetric()
   a_test_iter = iter(a_test_dataset)
   b_test_iter = iter(b_test_dataset)
   for iterations in tqdm.tqdm(range(1, max_iterations + 1)):
@@ -347,22 +350,27 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
       imlib.imwrite(img, img_filename)
 
     # Control loss accumulation
-    for shared_x, actions_x, mae_loss_mean_x, mse_loss_mean_x in [
-        (shared_a, actions_a, mae_loss_mean_a, mse_loss_mean_a),
-        (shared_b, actions_b, mae_loss_mean_b, mse_loss_mean_b)]:
+    for shared_x, actions_x, metrics_x in [
+        (shared_a, actions_a, (mae_metric_a, mse_metric_a, bmae_metric_a, bmse_metric_a)),
+        (shared_b, actions_b, (mae_metric_b, mse_metric_b, bmae_metric_b, bmse_metric_b)),
+    ]:
       if shared_x is None:
         continue
       predictions_x = controller(shared_x, training=training)
-      mae_loss = mae_loss_fn(actions_x, predictions_x)
-      mae_loss_mean_x.update_state(mae_loss.numpy())
-      mse_loss = mse_loss_fn(actions_x, predictions_x)
-      mse_loss_mean_x.update_state(mse_loss.numpy())
+      actions_x = actions_x.numpy()
+      predictions_x = predictions_x.numpy()
+      for metric_x in metrics_x:
+        metric_x.update_state(actions_x, predictions_x)
 
   C_loss_dict = {
-      'test_mae_loss_a': mae_loss_mean_a.result(),
-      'test_mae_loss_b': mae_loss_mean_b.result(),
-      'test_mse_loss_a': mse_loss_mean_a.result(),
-      'test_mse_loss_b': mse_loss_mean_b.result(),
+      'test_mae_metric_a': mae_metric_a.result(),
+      'test_mse_metric_a': mse_metric_a.result(),
+      'test_bmae_metric_a': bmae_metric_a.result(),
+      'test_bmse_metric_a': bmse_metric_a.result(),
+      'test_mae_metric_b': mae_metric_b.result(),
+      'test_mse_metric_b': mse_metric_b.result(),
+      'test_bmae_metric_b': bmae_metric_b.result(),
+      'test_bmse_metric_b': bmse_metric_b.result(),
   }
   return C_loss_dict
 
