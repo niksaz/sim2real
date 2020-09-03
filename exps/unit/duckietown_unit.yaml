@@ -10,6 +10,7 @@ config:
     ll_cycle_link_w: 100
     kl_cycle_link_w: 0.1
     z_recon_w: 0.1
+    z_temporal_w: 0.1
     gan_w: 10
     control_w: 1.0
     batch_size: 64
@@ -57,6 +58,6 @@ config:
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
     domain_a:
-      dataset_path: episode_1438/loop_empty_patched
+      dataset_path: episode_1438/loop_empty_patched_reformatted
     domain_b:
       dataset_path: logs/duckietown

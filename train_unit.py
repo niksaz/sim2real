@@ -55,10 +55,7 @@ class UNITModel(object):
 
   @tf.function
   def encode_ab_decode_aabb(self, x_a, x_b, training):
-    encoded_a = self.encoder_a(x_a, training=training)
-    encoded_b = self.encoder_b(x_b, training=training)
-    encoded_ab = tf.concat((encoded_a, encoded_b), axis=0)
-    encoded_shared = self.encoder_shared(encoded_ab, training=training)
+    encoded_shared = self.encode_ab(x_a, x_b, training)
     decoded_shared = self.decoder_shared(encoded_shared, training=training)
     decoded_a = self.decoder_a(decoded_shared, training=training)
     decoded_b = self.decoder_b(decoded_shared, training=training)
@@ -82,6 +79,14 @@ class UNITModel(object):
     decoded_a = self.decoder_a(decoded_shared, training=training)
     return decoded_a, encoded_shared
 
+  @tf.function
+  def encode_ab(self, x_a, x_b, training):
+    encoded_a = self.encoder_a(x_a, training=training)
+    encoded_b = self.encoder_b(x_b, training=training)
+    encoded_ab = tf.concat((encoded_a, encoded_b), axis=0)
+    encoded_shared = self.encoder_shared(encoded_ab, training=training)
+    return encoded_shared
+
 
 class Trainer(object):
   def __init__(self, model, controller, hyperparameters):
@@ -98,7 +103,7 @@ class Trainer(object):
     self.control_loss_criterion = utils.get_loss_fn(hyperparameters['control']['loss'])
 
   @tf.function
-  def joint_train_step(self, images_a, images_b, actions_a):
+  def joint_train_step(self, images_a, following_images_a, images_b, following_images_b, actions_a):
     training = True
     with tf.GradientTape(persistent=True) as t:
       x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
@@ -139,6 +144,12 @@ class Trainer(object):
       control_loss_a = self.control_loss_criterion(actions_a, predictions_a)
       predictions_ab = self.controller(shared_ab, training=training)
       control_loss_ab = self.control_loss_criterion(actions_a, predictions_ab)
+
+      following_ab_shared = self.model.encode_ab(following_images_a, following_images_b, training=training)
+      following_a_shared, following_b_shared = tf.split(
+          following_ab_shared, num_or_size_splits=[len(following_images_a), len(following_images_b)], axis=0)
+      z_temporal_loss_a = self.z_recon_loss_criterion(shared_a, following_a_shared)
+      z_temporal_loss_b = self.z_recon_loss_criterion(shared_b, following_b_shared)
       gen_loss = (
           self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
@@ -146,6 +157,7 @@ class Trainer(object):
           + self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
           + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
           + self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
+          + self.hyperparameters['z_temporal_w'] * (z_temporal_loss_a + z_temporal_loss_b)
           + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b))
 
       control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
@@ -190,6 +202,10 @@ class Trainer(object):
         'll_loss_b': ll_loss_b,
         'll_loss_aba': ll_loss_aba,
         'll_loss_bab': ll_loss_bab,
+        'z_recon_loss_a': z_recon_loss_a,
+        'z_recon_loss_b': z_recon_loss_b,
+        'z_temporal_loss_a': z_temporal_loss_a,
+        'z_temporal_loss_b': z_temporal_loss_b,
         'loss': gen_loss,
     }
     control_loss_name = self.hyperparameters['control']['loss']
@@ -214,9 +230,10 @@ def compile_sample_paths(dataset_path, descriptor_filename):
   descriptor_path = os.path.join(dataset_path, descriptor_filename)
   with open(descriptor_path, 'rb') as fin:
     sample_files = pickle.load(fin)
-  sample_paths = [
-      (os.path.join(dataset_path, ifile), os.path.join(dataset_path, afile))
-      for ifile, afile in sample_files]
+  sample_paths = []
+  for files_set in sample_files:
+    paths_set = [os.path.join(dataset_path, file) for file in files_set]
+    sample_paths.append(paths_set)
   return sample_paths
 
 
@@ -232,10 +249,12 @@ def create_image_action_dataset(config, label):
   crop_size = config_datasets['general']['crop_size']
 
   train_image_dataset = data.create_image_dataset(
-      [ipath for ipath, _ in train_paths], load_size, crop_size, training=True)
+      [ipath for ipath, _, _ in train_paths], load_size, crop_size, training=True)
+  train_following_image_dataset = data.create_image_dataset(
+      [ifpath for _, ifpath, _ in train_paths], load_size, crop_size, training=True)
   train_action_dataset = data.create_action_dataset(
-      [apath for _, apath in train_paths])
-  train_dataset = tf.data.Dataset.zip((train_image_dataset, train_action_dataset))
+      [apath for _, _, apath in train_paths])
+  train_dataset = tf.data.Dataset.zip((train_image_dataset, train_following_image_dataset, train_action_dataset))
   shuffle_buffer_size = max(batch_size * 128, 2048)
   train_dataset = train_dataset.shuffle(shuffle_buffer_size, reshuffle_each_iteration=True)
   train_dataset = train_dataset.repeat(None)
@@ -259,11 +278,12 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
   a_dataset_iter = iter(a_train_dataset)
   b_dataset_iter = iter(b_train_dataset)
   for iterations in tqdm.tqdm(range(1, optimizer_iterations + 1)):
-    images_a, actions_a = next(a_dataset_iter)
-    images_b, _ = next(b_dataset_iter)
+    images_a, following_images_a, actions_a = next(a_dataset_iter)
+    images_b, following_images_b, _ = next(b_dataset_iter)
 
     # Training ops
-    D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.joint_train_step(images_a, images_b, actions_a)
+    D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.joint_train_step(
+        images_a, following_images_a, images_b, following_images_b, actions_a)
     for c_loss_label, c_loss in C_loss_dict.items():
       if c_loss_label not in c_loss_mean_dict:
         c_loss_mean_dict[c_loss_label] = tf.keras.metrics.Mean()
