@@ -121,14 +121,14 @@ class Trainer(object):
       ad_true_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_true_b)
       ad_fake_loss_a = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_a)
       ad_fake_loss_b = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_b)
-      ad_loss_a = ad_true_loss_a + ad_fake_loss_a
-      ad_loss_b = ad_true_loss_b + ad_fake_loss_b
-      dis_loss = self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b)
+      dis_ad_loss_a = ad_true_loss_a + ad_fake_loss_a
+      dis_ad_loss_b = ad_true_loss_b + ad_fake_loss_b
+      dis_loss = self.hyperparameters['gan_w'] * (dis_ad_loss_a + dis_ad_loss_b)
 
       x_bab, shared_ba = self.model.encode_a_decode_b(x_ba, training=training)
       x_aba, shared_ab = self.model.encode_b_decode_a(x_ab, training=training)
-      ad_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_a)
-      ad_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_b)
+      gen_ad_loss_a = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_a)
+      gen_ad_loss_b = self.dis_loss_criterion(y_true=all1, y_pred=out_fake_b)
       ll_loss_a = self.ll_loss_criterion(y_true=images_a, y_pred=x_aa)
       ll_loss_b = self.ll_loss_criterion(y_true=images_b, y_pred=x_bb)
       ll_loss_aba = self.ll_loss_criterion(y_true=images_a, y_pred=x_aba)
@@ -158,7 +158,7 @@ class Trainer(object):
           + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
           + self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
           + self.hyperparameters['z_temporal_w'] * (z_temporal_loss_a + z_temporal_loss_b)
-          + self.hyperparameters['gan_w'] * (ad_loss_a + ad_loss_b))
+          + self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b))
 
       control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
 
@@ -188,31 +188,24 @@ class Trainer(object):
         'true_b_acc_batch': true_b_acc_batch,
         'fake_a_acc_batch': fake_a_acc_batch,
         'fake_b_acc_batch': fake_b_acc_batch,
+        'gan': self.hyperparameters['gan_w'] * (dis_ad_loss_a + dis_ad_loss_b),
         'loss': dis_loss,
     }
     G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
     G_loss_dict = {
-        'kl_direct_a_loss': kl_direct_a_loss,
-        'kl_direct_b_loss': kl_direct_b_loss,
-        'kl_cycle_ab_loss': kl_cycle_ab_loss,
-        'kl_cycle_ba_loss': kl_cycle_ba_loss,
-        'ad_loss_a': ad_loss_a,
-        'ad_loss_b': ad_loss_b,
-        'll_loss_a': ll_loss_a,
-        'll_loss_b': ll_loss_b,
-        'll_loss_aba': ll_loss_aba,
-        'll_loss_bab': ll_loss_bab,
-        'z_recon_loss_a': z_recon_loss_a,
-        'z_recon_loss_b': z_recon_loss_b,
-        'z_temporal_loss_a': z_temporal_loss_a,
-        'z_temporal_loss_b': z_temporal_loss_b,
+        'control': self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab),
+        'll_direct_link': self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b),
+        'll_cycle_link': self.hyperparameters['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab),
+        'kl_direct_link': self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss),
+        'kl_cycle_link': self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss),
+        'z_recon': self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b),
+        'z_temporal': self.hyperparameters['z_temporal_w'] * (z_temporal_loss_a + z_temporal_loss_b),
+        'gan': self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b),
         'loss': gen_loss,
     }
-    control_loss_name = self.hyperparameters['control']['loss']
     C_loss_dict = {
-        f'train_{control_loss_name}_loss_a': control_loss_a,
-        f'train_{control_loss_name}_loss_ab': control_loss_ab,
-        f'train_{control_loss_name}_loss': control_loss,
+        'control': self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab),
+        'loss': control_loss,
     }
     return D_loss_dict, G_images, G_loss_dict, C_loss_dict
 
