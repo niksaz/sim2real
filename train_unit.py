@@ -148,8 +148,18 @@ class Trainer(object):
       following_ab_shared = self.model.encode_ab(following_images_a, following_images_b, training=training)
       following_a_shared, following_b_shared = tf.split(
           following_ab_shared, num_or_size_splits=[len(following_images_a), len(following_images_b)], axis=0)
-      z_temporal_loss_a = self.z_recon_loss_criterion(shared_a, following_a_shared)
-      z_temporal_loss_b = self.z_recon_loss_criterion(shared_b, following_b_shared)
+
+      mse_none = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
+      following_a_shared_shuffled = tf.gather(
+          following_a_shared,
+          tf.random.shuffle(tf.range(tf.shape(following_a_shared)[0])))
+      following_a_unbound = mse_none(shared_a, following_a_shared) - mse_none(shared_a, following_a_shared_shuffled)
+      z_temporal_loss_a = tf.reduce_mean(tf.maximum(tf.zeros_like(following_a_unbound), following_a_unbound))
+      following_b_shared_shuffled = tf.gather(
+          following_b_shared,
+          tf.random.shuffle(tf.range(tf.shape(following_b_shared)[0])))
+      following_b_unbound = mse_none(shared_b, following_b_shared) - mse_none(shared_b, following_b_shared_shuffled)
+      z_temporal_loss_b = tf.reduce_mean(tf.maximum(tf.zeros_like(following_b_unbound), following_b_unbound))
       gen_loss = (
           self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
