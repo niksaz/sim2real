@@ -240,17 +240,7 @@ def compile_sample_paths(dataset_path, descriptor_filename):
   return sample_paths
 
 
-def create_image_action_dataset(config, label):
-  config_datasets = config['datasets']
-  batch_size = config['hyperparameters']['batch_size']
-  dataset_path = os.path.join(
-      config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
-  train_paths = compile_sample_paths(dataset_path, 'train_files.pickle')
-  test_paths = compile_sample_paths(dataset_path, 'test_files.pickle')
-  print(f'There are {len(train_paths)} train and {len(test_paths)} test samples in the dataset {label}.')
-  load_size = config_datasets['general']['load_size']
-  crop_size = config_datasets['general']['crop_size']
-
+def create_image_action_dataset_from_paths(train_paths, test_paths, load_size, crop_size, batch_size):
   train_image_dataset = data.create_image_dataset(
       [ipath for ipath, _, _ in train_paths], load_size, crop_size, training=True)
   train_following_image_dataset = data.create_image_dataset(
@@ -272,6 +262,19 @@ def create_image_action_dataset(config, label):
   test_dataset_len = math.ceil(len(test_paths) / batch_size)
 
   return train_dataset, test_dataset, test_dataset_len
+
+
+def create_image_action_dataset(config, label):
+  config_datasets = config['datasets']
+  batch_size = config['hyperparameters']['batch_size']
+  dataset_path = os.path.join(
+      config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
+  train_paths = compile_sample_paths(dataset_path, 'train_files.pickle')
+  test_paths = compile_sample_paths(dataset_path, 'test_files.pickle')
+  print(f'There are {len(train_paths)} train and {len(test_paths)} test samples in the dataset {label}.')
+  load_size = config_datasets['general']['load_size']
+  crop_size = config_datasets['general']['crop_size']
+  return create_image_action_dataset_from_paths(train_paths, test_paths, load_size, crop_size, batch_size)
 
 
 def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
