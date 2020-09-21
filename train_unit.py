@@ -2,6 +2,7 @@
 
 import os
 import math
+import multiprocessing
 import pickle
 
 import tensorflow as tf
@@ -241,23 +242,57 @@ def compile_sample_paths(dataset_path, descriptor_filename):
 
 
 def create_image_action_dataset_from_paths(train_paths, test_paths, load_size, crop_size, batch_size):
-  train_image_dataset = data.create_image_dataset(
-      [ipath for ipath, _, _ in train_paths], load_size, crop_size, training=True)
-  train_following_image_dataset = data.create_image_dataset(
-      [ifpath for _, ifpath, _ in train_paths], load_size, crop_size, training=True)
-  train_action_dataset = data.create_action_dataset(
-      [apath for _, _, apath in train_paths])
-  train_dataset = tf.data.Dataset.zip((train_image_dataset, train_following_image_dataset, train_action_dataset))
-  shuffle_buffer_size = max(batch_size * 128, 2048)
-  train_dataset = train_dataset.shuffle(shuffle_buffer_size, reshuffle_each_iteration=True)
-  train_dataset = train_dataset.repeat(None)
+  def get_parse_img_fn(training):
+    @tf.function
+    def parse_img(path):
+      img = tf.io.read_file(path)
+      img = tf.image.decode_png(img, 3)  # fix channels to 3
+      img_preprocessing_fn = data.img_preprocessing_fn(load_size, crop_size, training=training)
+      img = img_preprocessing_fn(img)
+      return img
+    return parse_img
+  parse_img_train = get_parse_img_fn(training=True)
+  parse_img_test = get_parse_img_fn(training=False)
+
+  @tf.function
+  def parse_action(path):
+    action = tf.py_function(lambda path: np.load(path.numpy()), inp=[path], Tout=tf.float32)
+    return action
+
+  def train_generator():
+    while True:
+      np.random.shuffle(train_paths)
+      for ipath, ifpath, apath in train_paths:
+        yield ipath, ifpath, apath
+
+  def test_generator():
+    for ipath, apath in test_paths:
+      yield ipath, apath
+
+  @tf.function
+  def parse_train_data(ipath, ifpath, apath):
+    return parse_img_train(ipath), parse_img_train(ifpath), parse_action(apath)
+
+  @tf.function
+  def parse_test_data(ipath, apath):
+    return parse_img_test(ipath), parse_action(apath)
+
+  n_map_threads = multiprocessing.cpu_count()
+
+  train_dataset = tf.data.Dataset.from_generator(
+    generator=train_generator,
+    output_types=(tf.string, tf.string, tf.string),
+    output_shapes=(tf.TensorShape([]), tf.TensorShape([]), tf.TensorShape([])),
+  )
+  train_dataset = train_dataset.map(parse_train_data, num_parallel_calls=n_map_threads)
   train_dataset = train_dataset.batch(batch_size, drop_remainder=False)
 
-  test_image_dataset = data.create_image_dataset(
-      [ipath for ipath, _ in test_paths], load_size, crop_size, training=False)
-  test_action_dataset = data.create_action_dataset(
-      [apath for _, apath in test_paths])
-  test_dataset = tf.data.Dataset.zip((test_image_dataset, test_action_dataset))
+  test_dataset = tf.data.Dataset.from_generator(
+      generator=test_generator,
+      output_types=(tf.string, tf.string),
+      output_shapes=(tf.TensorShape([]), tf.TensorShape([])),
+  )
+  test_dataset = test_dataset.map(parse_test_data, num_parallel_calls=n_map_threads)
   test_dataset = test_dataset.batch(batch_size, drop_remainder=False)
   test_dataset_len = math.ceil(len(test_paths) / batch_size)
 
