@@ -19,27 +19,6 @@ import optimization
 import utils
 
 
-@tf.function
-def _compute_true_acc(predictions):
-  predictions_true = tf.greater(predictions, 0.5)
-  predictions_true = tf.cast(predictions_true, predictions.dtype)
-  return tf.reduce_sum(predictions_true) / tf.size(predictions_true, out_type=predictions.dtype)
-
-
-@tf.function
-def _compute_fake_acc(predictions):
-  predictions_fake = tf.less(predictions, 0.5)
-  predictions_fake = tf.cast(predictions_fake, predictions.dtype)
-  return tf.reduce_sum(predictions_fake) / tf.size(predictions_fake, out_type=predictions.dtype)
-
-
-@tf.function
-def _compute_kl(mu):
-  mu_2 = tf.pow(mu, 2)
-  encoding_loss = tf.reduce_mean(mu_2)
-  return encoding_loss
-
-
 class UNITModel(object):
   def __init__(self, config):
     gen_hyperparameters = config['hyperparameters']['gen']
@@ -135,10 +114,10 @@ class Trainer(object):
       ll_loss_aba = self.ll_loss_criterion(y_true=images_a, y_pred=x_aba)
       ll_loss_bab = self.ll_loss_criterion(y_true=images_b, y_pred=x_bab)
       shared_a, shared_b = tf.split(shared, num_or_size_splits=[len(images_a), len(images_b)], axis=0)
-      kl_direct_a_loss = _compute_kl(shared_a)
-      kl_direct_b_loss = _compute_kl(shared_b)
-      kl_cycle_ab_loss = _compute_kl(shared_ab)
-      kl_cycle_ba_loss = _compute_kl(shared_ba)
+      kl_direct_a_loss = utils.compute_kl(shared_a)
+      kl_direct_b_loss = utils.compute_kl(shared_b)
+      kl_cycle_ab_loss = utils.compute_kl(shared_ab)
+      kl_cycle_ba_loss = utils.compute_kl(shared_ba)
       z_recon_loss_a = self.z_recon_loss_criterion(shared_a, shared_ab)
       z_recon_loss_b = self.z_recon_loss_criterion(shared_b, shared_ba)
       predictions_a = self.controller(shared_a, training=training)
@@ -190,10 +169,10 @@ class Trainer(object):
     self.gen_opt.apply_gradients(zip(gen_grads, gen_variables))
     self.control_opt.apply_gradients(zip(control_grads, control_variables))
 
-    true_a_acc_batch = _compute_true_acc(out_true_a)
-    true_b_acc_batch = _compute_true_acc(out_true_b)
-    fake_a_acc_batch = _compute_fake_acc(out_fake_a)
-    fake_b_acc_batch = _compute_fake_acc(out_fake_b)
+    true_a_acc_batch = utils.compute_true_acc(out_true_a)
+    true_b_acc_batch = utils.compute_true_acc(out_true_b)
+    fake_a_acc_batch = utils.compute_fake_acc(out_fake_a)
+    fake_b_acc_batch = utils.compute_fake_acc(out_fake_b)
     D_loss_dict = {
         'true_a_acc_batch': true_a_acc_batch,
         'true_b_acc_batch': true_b_acc_batch,

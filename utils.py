@@ -35,3 +35,24 @@ def get_loss_fn(loss_name) -> tf.keras.losses.Loss:
     return tf.keras.losses.BinaryCrossentropy()
   else:
     raise ValueError(f'Loss with name {loss_name} is not supported.')
+
+
+@tf.function
+def compute_true_acc(predictions):
+  predictions_true = tf.greater(predictions, 0.5)
+  predictions_true = tf.cast(predictions_true, predictions.dtype)
+  return tf.reduce_sum(predictions_true) / tf.size(predictions_true, out_type=predictions.dtype)
+
+
+@tf.function
+def compute_fake_acc(predictions):
+  predictions_fake = tf.less(predictions, 0.5)
+  predictions_fake = tf.cast(predictions_fake, predictions.dtype)
+  return tf.reduce_sum(predictions_fake) / tf.size(predictions_fake, out_type=predictions.dtype)
+
+
+@tf.function
+def compute_kl(mu):
+  mu_2 = tf.pow(mu, 2)
+  encoding_loss = tf.reduce_mean(mu_2)
+  return encoding_loss
