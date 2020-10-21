@@ -229,25 +229,16 @@ class Trainer(object):
     optimizer.apply_gradients(zip(grads, variables))
 
 
-def compile_sample_paths(dataset_path, descriptor_filename):
-  assert descriptor_filename.endswith('.pickle')
-  descriptor_path = os.path.join(dataset_path, descriptor_filename)
-  with open(descriptor_path, 'rb') as fin:
-    sample_files = pickle.load(fin)
-  sample_paths = []
-  for files_set in sample_files:
-    paths_set = [os.path.join(dataset_path, file) for file in files_set]
-    sample_paths.append(paths_set)
-  return sample_paths
-
-
-def create_image_action_dataset_from_paths(train_paths, test_paths, load_size, crop_size, batch_size):
+def create_image_action_dataset_from_paths(dataset_path, train_episodes, test_episodes, dataset_gen_cfg, batch_size):
   def get_parse_img_fn(training):
     @tf.function
     def parse_img(path):
       img = tf.io.read_file(path)
       img = tf.image.decode_png(img, 3)  # fix channels to 3
-      img_preprocessing_fn = data.img_preprocessing_fn(load_size, crop_size, training=training)
+      img_preprocessing_fn = data.img_preprocessing_fn(
+          dataset_gen_cfg['load_size'],
+          dataset_gen_cfg['crop_size'],
+          training=training)
       img = img_preprocessing_fn(img)
       return img
     return parse_img
@@ -259,14 +250,23 @@ def create_image_action_dataset_from_paths(train_paths, test_paths, load_size, c
     action = tf.py_function(lambda path: np.load(path.numpy()), inp=[path], Tout=tf.float32)
     return action
 
+  train_frames = [(bounds, i) for bounds in train_episodes for i in range(bounds[0], bounds[1])]
   def train_generator():
     while True:
-      np.random.shuffle(train_paths)
-      for ipath, ifpath, apath in train_paths:
-        yield ipath, ifpath, apath
+      np.random.shuffle(train_frames)
+      for bounds, i in train_frames:
+        neighs = [i + 1 if i + 1 < bounds[1] else i]
+        neigh = np.random.choice(neighs, 1)[0]
+        ipath = os.path.join(dataset_path, f'{i}.png')
+        npath = os.path.join(dataset_path, f'{neigh}.png')
+        apath = os.path.join(dataset_path, f'{i}.npy')
+        yield ipath, npath, apath
 
+  test_frames = [(bounds, i) for bounds in test_episodes for i in range(bounds[0], bounds[1])]
   def test_generator():
-    for ipath, apath in test_paths:
+    for bounds, i in test_frames:
+      ipath = os.path.join(dataset_path, f'{i}.png')
+      apath = os.path.join(dataset_path, f'{i}.npy')
       yield ipath, apath
 
   @tf.function
@@ -294,9 +294,25 @@ def create_image_action_dataset_from_paths(train_paths, test_paths, load_size, c
   )
   test_dataset = test_dataset.map(parse_test_data, num_parallel_calls=n_map_threads)
   test_dataset = test_dataset.batch(batch_size, drop_remainder=False)
-  test_dataset_len = math.ceil(len(test_paths) / batch_size)
+  test_dataset_len = math.ceil(len(test_frames) / batch_size)
 
   return train_dataset, test_dataset, test_dataset_len
+
+
+def load_pickle_fin(pickle_path):
+  with open(pickle_path, 'rb') as fin:
+    return pickle.load(fin)
+
+
+def compile_sample_paths(dataset_path, descriptor_filename):
+  assert descriptor_filename.endswith('.pickle')
+  descriptor_path = os.path.join(dataset_path, descriptor_filename)
+  sample_files = load_pickle_fin(descriptor_path)
+  sample_paths = []
+  for files_set in sample_files:
+    paths_set = [os.path.join(dataset_path, file) for file in files_set]
+    sample_paths.append(paths_set)
+  return sample_paths
 
 
 def create_image_action_dataset(config, label):
@@ -304,12 +320,11 @@ def create_image_action_dataset(config, label):
   batch_size = config['hyperparameters']['batch_size']
   dataset_path = os.path.join(
       config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
-  train_paths = compile_sample_paths(dataset_path, 'train_files.pickle')
-  test_paths = compile_sample_paths(dataset_path, 'test_files.pickle')
-  print(f'There are {len(train_paths)} train and {len(test_paths)} test samples in the dataset {label}.')
-  load_size = config_datasets['general']['load_size']
-  crop_size = config_datasets['general']['crop_size']
-  return create_image_action_dataset_from_paths(train_paths, test_paths, load_size, crop_size, batch_size)
+  train_episodes = load_pickle_fin(os.path.join(dataset_path, 'train_episodes.pickle'))
+  test_episodes = load_pickle_fin(os.path.join(dataset_path, 'test_episodes.pickle'))
+  print(f'There are {len(train_episodes)} train and {len(test_episodes)} test episodes in the dataset {label}.')
+  return create_image_action_dataset_from_paths(
+      dataset_path, train_episodes, test_episodes, config_datasets['general'], batch_size)
 
 
 def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
