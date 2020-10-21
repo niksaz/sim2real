@@ -13,13 +13,13 @@ def run_experiment(config, update_params, tag):
       config_scope = config_scope[field]
     config_scope[field_parts[-1]] = field_value
 
-  generated_config_path = 'exps/unit/generated_duckietown_unit.yaml'
+  generated_config_path = 'configs/unit/generated_duckietown_unit.yaml'
   configuration.dump_config(generated_config, generated_config_path)
   os.system(f'python train_unit.py {tag} --config_path {generated_config_path}')
 
 
 def main():
-  original_config_path = 'exps/unit/duckietown_unit.yaml'
+  original_config_path = 'configs/unit/duckietown_unit.yaml'
   config = configuration.load_config(original_config_path)
   iterations = 10000
   for z_recon_w in [0.0, 0.1]:

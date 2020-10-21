@@ -14,7 +14,7 @@ def print_time(start, ended):
 
 class TestDataset(unittest.TestCase):
   def test_iteration(self):
-    config_path = os.path.join('exps', 'unit', 'duckietown_unit.yaml')
+    config_path = os.path.join('configs', 'unit', 'duckietown_unit.yaml')
     config = configuration.load_config(config_path)
     a_train_dataset, a_test_dataset, a_test_length = train_unit.create_image_action_dataset(config, 'domain_a')
     b_train_dataset, b_test_dataset, b_test_length = train_unit.create_image_action_dataset(config, 'domain_b')
