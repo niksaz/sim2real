@@ -26,10 +26,12 @@ def fix_random_seeds(seed):
   np.random.seed(seed)
 
 
-def get_loss_fn(loss_name):
+def get_loss_fn(loss_name) -> tf.keras.losses.Loss:
   if loss_name == 'mse':
     return tf.keras.losses.MeanSquaredError()
   elif loss_name == 'mae':
     return tf.keras.losses.MeanAbsoluteError()
   elif loss_name == 'bce':
     return tf.keras.losses.BinaryCrossentropy()
+  else:
+    raise ValueError(f'Loss with name {loss_name} is not supported.')
