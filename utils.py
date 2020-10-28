@@ -1,10 +1,20 @@
 # Author: Mikita Sazanovich
 
-import time
+import logging
 import os
+import time
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
+
+def setup_logging():
+  logger = logging.getLogger()
+  logger.setLevel(logging.DEBUG)
+  formatter = logging.Formatter('%(asctime)s:%(name)s:%(levelname)s: %(message)s', datefmt='%Y-%m-%d %I-%M-%S')
+  stream_handler = logging.StreamHandler()
+  stream_handler.setFormatter(formatter)
+  logger.addHandler(stream_handler)
 
 
 def create_output_dirs(output_dir_base, model, tag, dirs_to_create):

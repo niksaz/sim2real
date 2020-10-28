@@ -4,6 +4,7 @@ import os
 import math
 import multiprocessing
 import pickle
+import logging
 
 import tensorflow as tf
 import numpy as np
@@ -83,8 +84,17 @@ class Trainer(object):
     self.control_loss_criterion = utils.get_loss_fn(hyperparameters['control']['loss'])
 
   @tf.function
-  def joint_train_step(self, images_a, following_images_a, images_b, following_images_b, actions_a):
+  def joint_train_step(self, images_a, actions_a, images_b):
     training = True
+    images_a_shape = tf.shape(images_a)
+    images_a = tf.reshape(
+        images_a, [images_a_shape[0] * images_a_shape[1], images_a_shape[2], images_a_shape[3], images_a_shape[4]])
+    actions_a_shape = tf.shape(actions_a)
+    actions_a = tf.reshape(
+        actions_a, [actions_a_shape[0] * actions_a_shape[1], actions_a_shape[2]])
+    images_b_shape = tf.shape(images_b)
+    images_b = tf.reshape(
+        images_b, [images_b_shape[0] * images_b_shape[1], images_b_shape[2], images_b_shape[3], images_b_shape[4]])
     with tf.GradientTape(persistent=True) as t:
       x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
       data_a = tf.concat((images_a, x_ba), axis=0)
@@ -125,21 +135,6 @@ class Trainer(object):
       predictions_ab = self.controller(shared_ab, training=training)
       control_loss_ab = self.control_loss_criterion(actions_a, predictions_ab)
 
-      following_ab_shared = self.model.encode_ab(following_images_a, following_images_b, training=training)
-      following_a_shared, following_b_shared = tf.split(
-          following_ab_shared, num_or_size_splits=[len(following_images_a), len(following_images_b)], axis=0)
-
-      mse_none = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
-      following_a_shared_shuffled = tf.gather(
-          following_a_shared,
-          tf.random.shuffle(tf.range(tf.shape(following_a_shared)[0])))
-      following_a_unbound = mse_none(shared_a, following_a_shared) - mse_none(shared_a, following_a_shared_shuffled)
-      z_temporal_loss_a = tf.reduce_mean(tf.maximum(tf.zeros_like(following_a_unbound), following_a_unbound))
-      following_b_shared_shuffled = tf.gather(
-          following_b_shared,
-          tf.random.shuffle(tf.range(tf.shape(following_b_shared)[0])))
-      following_b_unbound = mse_none(shared_b, following_b_shared) - mse_none(shared_b, following_b_shared_shuffled)
-      z_temporal_loss_b = tf.reduce_mean(tf.maximum(tf.zeros_like(following_b_unbound), following_b_unbound))
       gen_loss = (
           self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
@@ -147,7 +142,6 @@ class Trainer(object):
           + self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
           + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
           + self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
-          + self.hyperparameters['z_temporal_w'] * (z_temporal_loss_a + z_temporal_loss_b)
           + self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b))
 
       control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
@@ -189,7 +183,6 @@ class Trainer(object):
         'kl_direct_link': self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss),
         'kl_cycle_link': self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss),
         'z_recon': self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b),
-        'z_temporal': self.hyperparameters['z_temporal_w'] * (z_temporal_loss_a + z_temporal_loss_b),
         'gan': self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b),
         'loss': gen_loss,
     }
@@ -208,7 +201,10 @@ class Trainer(object):
     optimizer.apply_gradients(zip(grads, variables))
 
 
-def create_image_action_dataset_from_paths(dataset_path, train_episodes, test_episodes, dataset_gen_cfg, batch_size):
+def create_image_action_dataset_from_episodes(dataset_path, train_episodes, test_episodes, dataset_gen_cfg, hypers):
+  episode_batch_size = hypers['episode_batch_size']
+  temporal_batch_size = hypers['temporal_batch_size']
+
   def get_parse_img_fn(training):
     @tf.function
     def parse_img(path):
@@ -229,28 +225,44 @@ def create_image_action_dataset_from_paths(dataset_path, train_episodes, test_ep
     action = tf.py_function(lambda path: np.load(path.numpy()), inp=[path], Tout=tf.float32)
     return action
 
-  train_frames = [(bounds, i) for bounds in train_episodes for i in range(bounds[0], bounds[1])]
   def train_generator():
     while True:
-      np.random.shuffle(train_frames)
-      for bounds, i in train_frames:
-        neighs = [i + 1 if i + 1 < bounds[1] else i]
-        neigh = np.random.choice(neighs, 1)[0]
-        ipath = os.path.join(dataset_path, f'{i}.png')
-        npath = os.path.join(dataset_path, f'{neigh}.png')
-        apath = os.path.join(dataset_path, f'{i}.npy')
-        yield ipath, npath, apath
+      batches = []
+      for ep_i, bounds in enumerate(train_episodes):
+        episode_len = bounds[1] - bounds[0]
+        if episode_len < temporal_batch_size:
+          logging.warning(
+              f'Training episode {ep_i} has {episode_len} samples, but the temporal batch size is '
+              f'{temporal_batch_size}. Skipping it.')
+          continue
+        indexes = [index for index in range(bounds[0], bounds[1])]
+        np.random.shuffle(indexes)
+        batch_start = 0
+        while batch_start < episode_len:
+          batch_end = batch_start + temporal_batch_size
+          if batch_end > episode_len:
+            batch_end = episode_len
+            batch_start = batch_end - temporal_batch_size
+          batches.append(indexes[batch_start:batch_end])
+          batch_start = batch_end
+      np.random.shuffle(batches)
+      for indexes in batches:
+        image_paths = [os.path.join(dataset_path, f'{sample}.png') for sample in indexes]
+        action_paths = [os.path.join(dataset_path, f'{sample}.npy') for sample in indexes]
+        yield image_paths, action_paths
 
-  test_frames = [(bounds, i) for bounds in test_episodes for i in range(bounds[0], bounds[1])]
+  test_bounds_indexes = [(bounds, i) for bounds in test_episodes for i in range(bounds[0], bounds[1])]
   def test_generator():
-    for bounds, i in test_frames:
+    for _, i in test_bounds_indexes:
       ipath = os.path.join(dataset_path, f'{i}.png')
       apath = os.path.join(dataset_path, f'{i}.npy')
       yield ipath, apath
 
   @tf.function
-  def parse_train_data(ipath, ifpath, apath):
-    return parse_img_train(ipath), parse_img_train(ifpath), parse_action(apath)
+  def parse_train_data(image_paths, action_paths):
+    image_tensors = tf.map_fn(parse_img_train, image_paths, dtype=tf.float32)
+    action_tensors = tf.map_fn(parse_action, action_paths, dtype=tf.float32)
+    return tf.stack(image_tensors), tf.stack(action_tensors)
 
   @tf.function
   def parse_test_data(ipath, apath):
@@ -260,20 +272,21 @@ def create_image_action_dataset_from_paths(dataset_path, train_episodes, test_ep
 
   train_dataset = tf.data.Dataset.from_generator(
     generator=train_generator,
-    output_types=(tf.string, tf.string, tf.string),
-    output_shapes=(tf.TensorShape([]), tf.TensorShape([]), tf.TensorShape([])),
+    output_types=(tf.string, tf.string),
+    output_shapes=(tf.TensorShape([temporal_batch_size]), tf.TensorShape([temporal_batch_size])),
   )
   train_dataset = train_dataset.map(parse_train_data, num_parallel_calls=n_map_threads)
-  train_dataset = train_dataset.batch(batch_size, drop_remainder=False)
+  train_dataset = train_dataset.batch(episode_batch_size, drop_remainder=False)
 
+  test_batch_size = episode_batch_size * temporal_batch_size
   test_dataset = tf.data.Dataset.from_generator(
       generator=test_generator,
       output_types=(tf.string, tf.string),
       output_shapes=(tf.TensorShape([]), tf.TensorShape([])),
   )
   test_dataset = test_dataset.map(parse_test_data, num_parallel_calls=n_map_threads)
-  test_dataset = test_dataset.batch(batch_size, drop_remainder=False)
-  test_dataset_len = math.ceil(len(test_frames) / batch_size)
+  test_dataset = test_dataset.batch(test_batch_size, drop_remainder=False)
+  test_dataset_len = math.ceil(len(test_bounds_indexes) / test_batch_size)
 
   return train_dataset, test_dataset, test_dataset_len
 
@@ -283,27 +296,14 @@ def load_pickle_fin(pickle_path):
     return pickle.load(fin)
 
 
-def compile_sample_paths(dataset_path, descriptor_filename):
-  assert descriptor_filename.endswith('.pickle')
-  descriptor_path = os.path.join(dataset_path, descriptor_filename)
-  sample_files = load_pickle_fin(descriptor_path)
-  sample_paths = []
-  for files_set in sample_files:
-    paths_set = [os.path.join(dataset_path, file) for file in files_set]
-    sample_paths.append(paths_set)
-  return sample_paths
-
-
 def create_image_action_dataset(config, label):
   config_datasets = config['datasets']
-  batch_size = config['hyperparameters']['batch_size']
-  dataset_path = os.path.join(
-      config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
+  dataset_path = os.path.join(config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
   train_episodes = load_pickle_fin(os.path.join(dataset_path, 'train_episodes.pickle'))
   test_episodes = load_pickle_fin(os.path.join(dataset_path, 'test_episodes.pickle'))
-  print(f'There are {len(train_episodes)} train and {len(test_episodes)} test episodes in the dataset {label}.')
-  return create_image_action_dataset_from_paths(
-      dataset_path, train_episodes, test_episodes, config_datasets['general'], batch_size)
+  logging.info(f'There are {len(train_episodes)} train and {len(test_episodes)} test episodes in the dataset {label}.')
+  return create_image_action_dataset_from_episodes(
+      dataset_path, train_episodes, test_episodes, config_datasets['general'], config['hyperparameters'])
 
 
 def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir):
@@ -313,12 +313,11 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
   a_dataset_iter = iter(a_train_dataset)
   b_dataset_iter = iter(b_train_dataset)
   for iterations in tqdm.tqdm(range(1, optimizer_iterations + 1)):
-    images_a, following_images_a, actions_a = next(a_dataset_iter)
-    images_b, following_images_b, _ = next(b_dataset_iter)
+    images_a, actions_a = next(a_dataset_iter)
+    images_b, _ = next(b_dataset_iter)
 
     # Training ops
-    D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.joint_train_step(
-        images_a, following_images_a, images_b, following_images_b, actions_a)
+    D_loss_dict, G_images, G_loss_dict, C_loss_dict = trainer.joint_train_step(images_a, actions_a, images_b)
     for c_loss_label, c_loss in C_loss_dict.items():
       if c_loss_label not in c_loss_mean_dict:
         c_loss_mean_dict[c_loss_label] = tf.keras.metrics.Mean()
@@ -340,7 +339,8 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
     else:
       img_filename = None
     if img_filename:
-      img = imlib.immerge(np.concatenate([images_a, images_b] + G_images, axis=0), n_rows=8)
+      img = imlib.immerge(
+          np.concatenate([row_a for row_a in images_a] + [row_b for row_b in images_b] + G_images, axis=0), n_rows=8)
       imlib.imwrite(img, img_filename)
     # Testing and checkpointing ops
     if iterations % config['test_every_iterations'] == 0 or iterations == optimizer_iterations:
@@ -433,8 +433,9 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
 def main():
   args = configuration.parse_args()
   config = configuration.load_config(args.config_path)
-  print('args:', args)
-  print('config:', config)
+  utils.setup_logging()
+  logging.info(f'args: {args}')
+  logging.info(f'config: {config}')
 
   utils.fix_random_seeds(config['hyperparameters']['seed'])
 
@@ -470,7 +471,7 @@ def main():
   try:  # Restore checkpoint
     checkpoint.restore().assert_existing_objects_matched()
   except Exception as e:
-    print(e)
+    logging.error(e)
   summary_writer = tf.summary.create_file_writer(summaries_dir)
 
   with summary_writer.as_default():

@@ -6,10 +6,7 @@ import time
 
 import configuration
 import train_unit
-
-
-def print_time(start, ended):
-  print(f'Time spent: {ended - start:.4f}s')
+import layers
 
 
 class TrainUnitTest(unittest.TestCase):
@@ -23,8 +20,34 @@ class TrainUnitTest(unittest.TestCase):
       time_start = time.time()
       for batch_tuple in dataset:
         print(f'Dataset has been tested. The length of the batch tuple is {len(batch_tuple)}.')
-        for el in batch_tuple:
-          print(el.shape)
+        for batch_element in batch_tuple:
+          print(batch_element.shape)
         break
       time_ended = time.time()
-      print_time(time_start, time_ended)
+      time_spent = time_ended - time_start
+      print(f'Time spent: {time_spent:.4f}s')
+
+  def test_joint_train_iteration(self):
+    config_path = os.path.join('configs', 'unit', 'duckietown_unit.yaml')
+    config = configuration.load_config(config_path)
+
+    unit_model = train_unit.UNITModel(config)
+    gen_hyperparameters = config['hyperparameters']['gen']
+    z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
+    control_hyperparameters = config['hyperparameters']['control']
+    controller = layers.Controller(z_ch, control_hyperparameters, 2)
+    trainer = train_unit.Trainer(unit_model, controller, config['hyperparameters'])
+
+    a_train_dataset, a_test_dataset, a_test_length = train_unit.create_image_action_dataset(config, 'domain_a')
+    b_train_dataset, b_test_dataset, b_test_length = train_unit.create_image_action_dataset(config, 'domain_b')
+
+    a_dataset_iter = iter(a_train_dataset)
+    b_dataset_iter = iter(b_train_dataset)
+    images_a, actions_a = next(a_dataset_iter)
+    images_b, _ = next(b_dataset_iter)
+
+    time_start = time.time()
+    trainer.joint_train_step(images_a, actions_a, images_b)
+    time_ended = time.time()
+    time_spent = time_ended - time_start
+    print(f'Time spent: {time_spent:.4f}s')
