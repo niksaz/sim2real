@@ -22,15 +22,11 @@ def main():
   original_config_path = 'configs/unit/duckietown_unit.yaml'
   config = configuration.load_config(original_config_path)
   iterations = 10000
-  for z_recon_w in [0.0, 0.1]:
-    for z_temporal_w in [0.0, 0.1, 1.0, 10.0]:
+  for repeat in range(8):
       run_experiment(
-          config, {
-              'hyperparameters/iterations': iterations,
-              'hyperparameters/z_recon_w': z_recon_w,
-              'hyperparameters/z_temporal_w': z_temporal_w,
-          },
-          f'SEP02_RECON_{z_recon_w}_TEMPO_{z_temporal_w}_RUN1_10k')
+          config,
+          {'hyperparameters/iterations': iterations},
+          f'DEBUG')
 
 
 if __name__ == '__main__':
