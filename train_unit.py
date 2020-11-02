@@ -146,17 +146,7 @@ class Trainer(object):
           batch_size=tf.shape(shared_all)[0],
           steps=None,
           seq_lens=None,
-          stochastic_matching=False,
-          normalize_embeddings=False,
-          loss_type='regression_mse_var',
-          similarity_type='l2',
-          num_cycles=None,
-          cycle_length=None,
-          temperature=0.1,
-          label_smoothing=None,
-          variance_lambda=0.001,
-          huber_delta=None,
-          normalize_indices=True)
+          **self.hyperparameters['loss']['tcc'])
 
       ll_direct_link_cmp = self.hyperparameters['loss']['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
       ll_cycle_link_cmp = self.hyperparameters['loss']['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)

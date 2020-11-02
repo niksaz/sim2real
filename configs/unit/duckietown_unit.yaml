@@ -17,6 +17,18 @@ config:
       z_recon_w: 0.1
       gan_w: 10
       tcc_w: 1.0
+      tcc:
+        stochastic_matching: false
+        normalize_embeddings: false
+        loss_type: regression_mse_var
+        similarity_type: l2
+        num_cycles: null
+        cycle_length: null
+        temperature: 0.1
+        label_smoothing: null
+        variance_lambda: 0.001
+        huber_delta: null
+        normalize_indices: true
       control_w: 1.0
       control: mse
     gen:
