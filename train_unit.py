@@ -82,7 +82,7 @@ class Trainer(object):
     self.dis_loss_criterion = utils.get_loss_fn('bce')
     self.ll_loss_criterion = utils.get_loss_fn('mae')
     self.z_recon_loss_criterion = utils.get_loss_fn('mae')
-    self.control_loss_criterion = utils.get_loss_fn(hyperparameters['control']['loss'])
+    self.control_loss_criterion = utils.get_loss_fn(hyperparameters['loss']['control'])
 
   @tf.function
   def joint_train_step(self, images_a, actions_a, images_b):
@@ -114,7 +114,7 @@ class Trainer(object):
       ad_fake_loss_b = self.dis_loss_criterion(y_true=all0, y_pred=out_fake_b)
       dis_ad_loss_a = ad_true_loss_a + ad_fake_loss_a
       dis_ad_loss_b = ad_true_loss_b + ad_fake_loss_b
-      dis_loss = self.hyperparameters['gan_w'] * (dis_ad_loss_a + dis_ad_loss_b)
+      dis_loss = self.hyperparameters['loss']['gan_w'] * (dis_ad_loss_a + dis_ad_loss_b)
 
       x_bab, shared_ba = self.model.encode_a_decode_b(x_ba, training=training)
       x_aba, shared_ab = self.model.encode_b_decode_a(x_ab, training=training)
@@ -158,17 +158,19 @@ class Trainer(object):
           huber_delta=None,
           normalize_indices=True)
 
-      gen_loss = (
-          self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
-          + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
-          + self.hyperparameters['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)
-          + self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
-          + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
-          + self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
-          + self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b)
-          + self.hyperparameters['tcc_w'] * tcc_loss)
+      ll_direct_link_cmp = self.hyperparameters['loss']['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
+      ll_cycle_link_cmp = self.hyperparameters['loss']['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)
+      kl_direct_link_cmp = self.hyperparameters['loss']['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
+      kl_cycle_link_cmp = self.hyperparameters['loss']['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
+      z_recon_cmp = self.hyperparameters['loss']['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
+      gan_cmp = self.hyperparameters['loss']['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b)
+      tcc_cmp = self.hyperparameters['loss']['tcc_w'] * tcc_loss
+      control_cmp = self.hyperparameters['loss']['control_w'] * (control_loss_a + control_loss_ab)
 
-      control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
+      gen_loss = (
+          ll_direct_link_cmp + ll_cycle_link_cmp + kl_direct_link_cmp + kl_cycle_link_cmp
+          + z_recon_cmp + gan_cmp + tcc_cmp + control_cmp)
+      control_loss = control_cmp
 
     dis_models = [self.model.dis_a, self.model.dis_b]
     dis_variables = [v for model in dis_models for v in model.trainable_variables]
@@ -196,23 +198,23 @@ class Trainer(object):
         'true_b_acc_batch': true_b_acc_batch,
         'fake_a_acc_batch': fake_a_acc_batch,
         'fake_b_acc_batch': fake_b_acc_batch,
-        'gan': self.hyperparameters['gan_w'] * (dis_ad_loss_a + dis_ad_loss_b),
+        'gan': dis_loss,
         'loss': dis_loss,
     }
     G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
     G_loss_dict = {
-        'control': self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab),
-        'll_direct_link': self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b),
-        'll_cycle_link': self.hyperparameters['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab),
-        'kl_direct_link': self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss),
-        'kl_cycle_link': self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss),
-        'z_recon': self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b),
-        'gan': self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b),
-        'tcc': self.hyperparameters['tcc_w'] * tcc_loss,
+        'control': control_cmp,
+        'll_direct_link': ll_direct_link_cmp,
+        'll_cycle_link': ll_cycle_link_cmp,
+        'kl_direct_link': kl_direct_link_cmp,
+        'kl_cycle_link': kl_cycle_link_cmp,
+        'z_recon': z_recon_cmp,
+        'gan': gan_cmp,
+        'tcc': tcc_cmp,
         'loss': gen_loss,
     }
     C_loss_dict = {
-        'control': self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab),
+        'control': control_cmp,
         'loss': control_loss,
     }
     return D_loss_dict, G_images, G_loss_dict, C_loss_dict
