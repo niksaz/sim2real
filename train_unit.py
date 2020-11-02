@@ -11,6 +11,7 @@ import numpy as np
 import imlib
 import tf2lib
 import tqdm
+import tcc
 
 import configuration
 import data
@@ -135,6 +136,28 @@ class Trainer(object):
       predictions_ab = self.controller(shared_ab, training=training)
       control_loss_ab = self.control_loss_criterion(actions_a, predictions_ab)
 
+      shared_a_red = tf.reduce_mean(shared_a, axis=(1, 2))
+      shared_b_red = tf.reduce_mean(shared_b, axis=(1, 2))
+      shared_a_red = tf.reshape(shared_a_red, [images_a_shape[0], images_a_shape[1], -1])
+      shared_b_red = tf.reshape(shared_b_red, [images_b_shape[0], images_b_shape[1], -1])
+      shared_all = tf.concat([shared_a_red, shared_b_red], axis=0)
+      tcc_loss = tcc.compute_alignment_loss(
+          embs=shared_all,
+          batch_size=tf.shape(shared_all)[0],
+          steps=None,
+          seq_lens=None,
+          stochastic_matching=False,
+          normalize_embeddings=False,
+          loss_type='regression_mse_var',
+          similarity_type='l2',
+          num_cycles=None,
+          cycle_length=None,
+          temperature=0.1,
+          label_smoothing=None,
+          variance_lambda=0.001,
+          huber_delta=None,
+          normalize_indices=True)
+
       gen_loss = (
           self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
           + self.hyperparameters['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
@@ -142,7 +165,8 @@ class Trainer(object):
           + self.hyperparameters['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
           + self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
           + self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
-          + self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b))
+          + self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b)
+          + self.hyperparameters['tcc_w'] * tcc_loss)
 
       control_loss = self.hyperparameters['control_w'] * (control_loss_a + control_loss_ab)
 
@@ -184,6 +208,7 @@ class Trainer(object):
         'kl_cycle_link': self.hyperparameters['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss),
         'z_recon': self.hyperparameters['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b),
         'gan': self.hyperparameters['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b),
+        'tcc': self.hyperparameters['tcc_w'] * tcc_loss,
         'loss': gen_loss,
     }
     C_loss_dict = {
@@ -199,6 +224,20 @@ class Trainer(object):
       variables.extend(model.trainable_variables)
     grads = tape.gradient(loss, variables)
     optimizer.apply_gradients(zip(grads, variables))
+
+
+def get_sample_image_action_paths(dataset_path, sample):
+  image_path = os.path.join(dataset_path, f'{sample}.png')
+  assert os.path.exists(image_path)
+  found_action = False
+  for action_path in [
+      os.path.join(dataset_path, f'{sample}_project.npy'),
+      os.path.join(dataset_path, f'{sample}.npy')]:
+    if os.path.exists(action_path):
+      found_action = True
+      break
+  assert found_action
+  return image_path, action_path
 
 
 def create_image_action_dataset_from_episodes(dataset_path, train_episodes, test_episodes, dataset_gen_cfg, hypers):
@@ -243,20 +282,25 @@ def create_image_action_dataset_from_episodes(dataset_path, train_episodes, test
           if batch_end > episode_len:
             batch_end = episode_len
             batch_start = batch_end - temporal_batch_size
-          batches.append(indexes[batch_start:batch_end])
+          batch_indexes = indexes[batch_start:batch_end]
+          batch_indexes.sort()
+          batches.append(batch_indexes)
           batch_start = batch_end
       np.random.shuffle(batches)
       for indexes in batches:
-        image_paths = [os.path.join(dataset_path, f'{sample}.png') for sample in indexes]
-        action_paths = [os.path.join(dataset_path, f'{sample}.npy') for sample in indexes]
+        image_paths = []
+        action_paths = []
+        for sample in indexes:
+          image_path, action_path = get_sample_image_action_paths(dataset_path, sample)
+          image_paths.append(image_path)
+          action_paths.append(action_path)
         yield image_paths, action_paths
 
   test_bounds_indexes = [(bounds, i) for bounds in test_episodes for i in range(bounds[0], bounds[1])]
   def test_generator():
-    for _, i in test_bounds_indexes:
-      ipath = os.path.join(dataset_path, f'{i}.png')
-      apath = os.path.join(dataset_path, f'{i}.npy')
-      yield ipath, apath
+    for _, sample in test_bounds_indexes:
+      image_path, action_path = get_sample_image_action_paths(dataset_path, sample)
+      yield image_path, action_path
 
   @tf.function
   def parse_train_data(image_paths, action_paths):
