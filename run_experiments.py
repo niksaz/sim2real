@@ -22,11 +22,14 @@ def main():
   original_config_path = 'configs/unit/duckietown_unit.yaml'
   config = configuration.load_config(original_config_path)
   iterations = 10000
-  for repeat in range(8):
+  for repeat in range(3):
+    for tcc_w in [0.0, 0.1, 1.0, 10.0, 100.0]:
       run_experiment(
-          config,
-          {'hyperparameters/iterations': iterations},
-          f'DEBUG')
+          config, {
+              'hyperparameters/tcc_w': tcc_w,
+              'hyperparameters/iterations': iterations,
+          },
+          f'PROJECT-TCC-W-{tcc_w}')
 
 
 if __name__ == '__main__':
