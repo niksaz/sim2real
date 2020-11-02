@@ -146,10 +146,10 @@ def compute_deterministic_alignment_loss(embs,
     loss: Tensor, Scalar loss tensor that imposes the chosen variant of the
         cycle-consistency loss.
   """
-  labels_list = []
-  logits_list = []
-  steps_list = []
-  seq_lens_list = []
+  logits_list = tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)
+  labels_list = tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)
+  steps_list = tf.TensorArray(dtype=tf.int32, size=0, dynamic_size=True)
+  seq_lens_list = tf.TensorArray(dtype=tf.int32, size=0, dynamic_size=True)
 
   for i in range(batch_size):
     for j in range(batch_size):
@@ -159,15 +159,15 @@ def compute_deterministic_alignment_loss(embs,
                                                  embs[j],
                                                  similarity_type,
                                                  temperature)
-        logits_list.append(logits)
-        labels_list.append(labels)
-        steps_list.append(tf.tile(steps[i:i+1], [num_steps, 1]))
-        seq_lens_list.append(tf.tile(seq_lens[i:i+1], [num_steps]))
+        logits_list = logits_list.write(logits_list.size(), logits)
+        labels_list = labels_list.write(labels_list.size(), labels)
+        steps_list = steps_list.write(steps_list.size(), tf.tile(steps[i:i+1], [num_steps, 1]))
+        seq_lens_list = seq_lens_list.write(seq_lens_list.size(), tf.tile(seq_lens[i:i+1], [num_steps]))
 
-  logits = tf.concat(logits_list, axis=0)
-  labels = tf.concat(labels_list, axis=0)
-  steps = tf.concat(steps_list, axis=0)
-  seq_lens = tf.concat(seq_lens_list, axis=0)
+  logits = logits_list.concat()
+  labels = labels_list.concat()
+  steps = steps_list.concat()
+  seq_lens = seq_lens_list.concat()
 
   if loss_type == 'classification':
     loss = classification_loss(logits, labels, label_smoothing)

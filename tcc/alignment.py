@@ -46,11 +46,11 @@ def compute_alignment_loss(embs,
   This function is a wrapper around different variants of the alignment loss
   described deterministic_alignment.py and stochastic_alignment.py files. The
   structure of the library is as follows:
-  i) loss_fns.py - Defines the different loss functions.
+  i) losses.py - Defines the different loss functions.
   ii) deterministic_alignment.py - Performs the alignment between sequences by
   deterministically sampling all steps of the sequences.
   iii) stochastic_alignment.py - Performs the alignment between sequences by
-  stochasticallty sub-sampling a fixed number of steps from the sequences.
+  stochastically sub-sampling a fixed number of steps from the sequences.
   There are four major hparams that need to be tuned while applying the loss:
   i) Should the loss be applied with L2 normalization on the embeddings or
   without it?
