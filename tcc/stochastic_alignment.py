@@ -10,7 +10,7 @@ def _align_single_cycle(cycle, embs, cycle_length, num_steps,
                         similarity_type, temperature):
   """Takes a single cycle and returns logits (simialrity scores) and labels."""
   # Choose random frame.
-  n_idx = tf.random_uniform((), minval=0, maxval=num_steps, dtype=tf.int32)
+  n_idx = tf.random.uniform((), minval=0, maxval=num_steps, dtype=tf.int32)
   # Create labels
   onehot_labels = tf.one_hot(n_idx, num_steps)
 
@@ -24,8 +24,8 @@ def _align_single_cycle(cycle, embs, cycle_length, num_steps,
     if similarity_type == 'l2':
       # Find L2 distance.
       mean_squared_distance = tf.reduce_sum(
-          tf.squared_difference(tf.tile(query_feats, [num_steps, 1]),
-                                candidate_feats), axis=1)
+          tf.math.squared_difference(tf.tile(query_feats, [num_steps, 1]),
+                                     candidate_feats), axis=1)
       # Convert L2 distance to similarity.
       similarity = -mean_squared_distance
 
@@ -57,8 +57,8 @@ def _align_single_cycle(cycle, embs, cycle_length, num_steps,
 def _align(cycles, embs, num_steps, num_cycles, cycle_length,
            similarity_type, temperature):
   """Align by finding cycles in embs."""
-  logits_list = []
-  labels_list = []
+  logits_list = tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)
+  labels_list = tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True)
   for i in range(num_cycles):
     logits, labels = _align_single_cycle(cycles[i],
                                          embs,
@@ -66,11 +66,11 @@ def _align(cycles, embs, num_steps, num_cycles, cycle_length,
                                          num_steps,
                                          similarity_type,
                                          temperature)
-    logits_list.append(logits)
-    labels_list.append(labels)
+    logits_list = logits_list.write(logits_list.size(), logits)
+    labels_list = labels_list.write(labels_list.size(), labels)
 
-  logits = tf.stack(logits_list)
-  labels = tf.stack(labels_list)
+  logits = logits_list.stack()
+  labels = labels_list.stack()
 
   return logits, labels
 
