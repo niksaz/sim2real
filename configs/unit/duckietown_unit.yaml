@@ -6,7 +6,7 @@ config:
   hyperparameters:
     trainer: Trainer
     seed: 30
-    iterations: 10000
+    iterations: 100000
     episode_batch_size: 2
     temporal_batch_size: 32
     loss:
@@ -16,7 +16,7 @@ config:
       kl_cycle_link_w: 0.1
       z_recon_w: 0.1
       gan_w: 10
-      tcc_w: 1.0
+      tcc_w: 100
       tcc:
         stochastic_matching: true
         normalize_embeddings: true

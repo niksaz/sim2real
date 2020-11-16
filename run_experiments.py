@@ -5,13 +5,16 @@ import configuration
 
 
 def run_experiment(config, update_params, tag):
-  generated_config = dict(config)
+  generated_config = config.copy()
   for field_path, field_value in update_params.items():
     field_parts = field_path.split('/')
     config_scope = generated_config
-    for field in field_parts[:-1]:
-      config_scope = config_scope[field]
-    config_scope[field_parts[-1]] = field_value
+    for index, field in enumerate(field_parts):
+      assert field in config_scope, f'Updating {field_path} which is unspecified in the initial config.'
+      if index + 1 == len(field_parts):
+        config_scope[field] = field_value
+      else:
+        config_scope = config_scope[field]
 
   generated_config_path = 'configs/unit/generated_duckietown_unit.yaml'
   configuration.dump_config(generated_config, generated_config_path)
@@ -24,12 +27,14 @@ def main():
   iterations = 10000
   for repeat in range(3):
     for tcc_w in [0.0, 0.1, 1.0, 10.0, 100.0]:
+      tag = 'TCC'
+      tag += f'-W-{tcc_w}'
       run_experiment(
           config, {
-              'hyperparameters/tcc_w': tcc_w,
               'hyperparameters/iterations': iterations,
+              'hyperparameters/loss/tcc_w': tcc_w,
           },
-          f'PROJECT-TCC-W-{tcc_w}')
+          tag)
 
 
 if __name__ == '__main__':

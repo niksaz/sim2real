@@ -3,7 +3,6 @@
 import os
 import math
 import multiprocessing
-import pickle
 import logging
 
 import tensorflow as tf
@@ -327,16 +326,11 @@ def create_image_action_dataset_from_episodes(dataset_path, train_episodes, test
   return train_dataset, test_dataset, test_dataset_len
 
 
-def load_pickle_fin(pickle_path):
-  with open(pickle_path, 'rb') as fin:
-    return pickle.load(fin)
-
-
 def create_image_action_dataset(config, label):
   config_datasets = config['datasets']
   dataset_path = os.path.join(config_datasets['general']['datasets_dir'], config_datasets[label]['dataset_path'])
-  train_episodes = load_pickle_fin(os.path.join(dataset_path, 'train_episodes.pickle'))
-  test_episodes = load_pickle_fin(os.path.join(dataset_path, 'test_episodes.pickle'))
+  train_episodes = utils.load_pickle_fin(os.path.join(dataset_path, 'train_episodes.pickle'))
+  test_episodes = utils.load_pickle_fin(os.path.join(dataset_path, 'test_episodes.pickle'))
   logging.info(f'There are {len(train_episodes)} train and {len(test_episodes)} test episodes in the dataset {label}.')
   return create_image_action_dataset_from_episodes(
       dataset_path, train_episodes, test_episodes, config_datasets['general'], config['hyperparameters'])

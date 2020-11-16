@@ -2,6 +2,7 @@
 
 import logging
 import os
+import pickle
 import time
 
 import numpy as np
@@ -29,6 +30,11 @@ def create_output_dirs(output_dir_base, model, tag, dirs_to_create):
     os.makedirs(dir_path, exist_ok=False)
     dir_paths.append(dir_path)
   return output_dir, dir_paths
+
+
+def load_pickle_fin(pickle_path):
+  with open(pickle_path, 'rb') as fin:
+    return pickle.load(fin)
 
 
 def fix_random_seeds(seed):
