@@ -189,6 +189,26 @@ class Decoder(tf.keras.Model):
     return self.model(inputs, **kwargs)
 
 
+class Downstreamer(tf.keras.Model):
+  def __init__(self, params):
+    super(Downstreamer, self).__init__()
+    layers = []
+    layers.append(tf.keras.layers.GlobalMaxPool2D())  # B x C
+    for fc_layer in params['fc_layers']:
+      # https://github.com/google-research/google-research/blob/084c18934c353207662aba0db6db52850029faf2/tcc/models.py#L50
+      # layers.append(get_norm_layer('batch_norm'))  # B x FC
+      # layers.append(tf.keras.layers.Dense(fc_layer))  # B x FC
+      # layers.append(tf.keras.layers.ReLU())  # B x FC
+      # AIDO3
+      layers.append(get_norm_layer('batch_norm'))
+      layers.append(tf.keras.layers.ReLU())
+      layers.append(tf.keras.layers.Dense(fc_layer))
+    self.model = tf.keras.Sequential(layers)
+
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
+
+
 class Discriminator(tf.keras.Model):
   def __init__(self, params):
     super(Discriminator, self).__init__()
@@ -213,21 +233,14 @@ class Discriminator(tf.keras.Model):
 class Controller(tf.keras.Model):
   def __init__(self, input_dim, control_hyperparameters, output_dim):
     super(Controller, self).__init__()
-    # B x 8 x 16 x 32 -> 4096 -> 16 -> 2 | n_layer=0
-    # B x 4 x 8 x 32 -> 1024 -> 16 -> 2 | n_layer=1
-    # B x 2 x 4 x 32 -> 256 -> 16 -> 2 | n_layer=2
-    # B x 1 x 2 x 32 -> 64 -> 16 -> 2 | n_layer=3
     layers = []
-    for layer in range(control_hyperparameters['n_layer']):
-      conv_block = NormReLUConv2DBlock(
-          input_dim, input_dim, kernel_size=3, strides=2, padding=1, norm_layer='batch_norm')
-      layers.append(conv_block)
-    layers.append(tf.keras.layers.Flatten())
     fc_layers_with_output = control_hyperparameters['fc_layers'] + [output_dim]
     for fc_layer in fc_layers_with_output:
+      # AIDO3
       layers.append(get_norm_layer('batch_norm'))
       layers.append(tf.keras.layers.ReLU())
       layers.append(tf.keras.layers.Dense(fc_layer))
+    layers.append(tf.keras.layers.Activation('tanh'))
     self.model = tf.keras.Sequential(layers=layers)
 
   def __call__(self, inputs, **kwargs):

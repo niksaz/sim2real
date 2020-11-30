@@ -26,6 +26,7 @@ class UNITModel(object):
     self.encoder_a = layers.Encoder(gen_hyperparameters)
     self.encoder_b = layers.Encoder(gen_hyperparameters)
     self.encoder_shared = layers.EncoderShared(gen_hyperparameters)
+    self.downstreamer = layers.Downstreamer(gen_hyperparameters)
     self.decoder_shared = layers.DecoderShared(gen_hyperparameters)
     self.decoder_a = layers.Decoder(gen_hyperparameters)
     self.decoder_b = layers.Decoder(gen_hyperparameters)
@@ -33,6 +34,14 @@ class UNITModel(object):
     dis_hyperparameters = config['hyperparameters']['dis']
     self.dis_a = layers.Discriminator(dis_hyperparameters)
     self.dis_b = layers.Discriminator(dis_hyperparameters)
+
+  def get_gen_models(self):
+    return [
+        self.encoder_a, self.encoder_b, self.encoder_shared, self.decoder_shared, self.decoder_a, self.decoder_b,
+        self.downstreamer]
+
+  def get_dis_models(self):
+    return [self.dis_a, self.dis_b]
 
   @tf.function
   def encode_ab_decode_aabb(self, x_a, x_b, training):
@@ -67,6 +76,10 @@ class UNITModel(object):
     encoded_ab = tf.concat((encoded_a, encoded_b), axis=0)
     encoded_shared = self.encoder_shared(encoded_ab, training=training)
     return encoded_shared
+
+  @tf.function
+  def downstream_hidden(self, shared):
+    return self.downstreamer(shared)
 
 
 class Trainer(object):
@@ -130,16 +143,18 @@ class Trainer(object):
       kl_cycle_ba_loss = utils.compute_kl(shared_ba)
       z_recon_loss_a = self.z_recon_loss_criterion(shared_a, shared_ab)
       z_recon_loss_b = self.z_recon_loss_criterion(shared_b, shared_ba)
-      predictions_a = self.controller(shared_a, training=training)
+
+      down_shared_a = self.model.downstream_hidden(shared_a)
+      down_shared_b = self.model.downstream_hidden(shared_b)
+      down_shared_ab = self.model.downstream_hidden(shared_ab)
+      predictions_a = self.controller(down_shared_a, training=training)
       control_loss_a = self.control_loss_criterion(actions_a, predictions_a)
-      predictions_ab = self.controller(shared_ab, training=training)
+      predictions_ab = self.controller(down_shared_ab, training=training)
       control_loss_ab = self.control_loss_criterion(actions_a, predictions_ab)
 
-      shared_a_red = tf.reduce_mean(shared_a, axis=(1, 2))
-      shared_b_red = tf.reduce_mean(shared_b, axis=(1, 2))
-      shared_a_red = tf.reshape(shared_a_red, [images_a_shape[0], images_a_shape[1], -1])
-      shared_b_red = tf.reshape(shared_b_red, [images_b_shape[0], images_b_shape[1], -1])
-      shared_all = tf.concat([shared_a_red, shared_b_red], axis=0)
+      temp_down_shared_a = tf.reshape(down_shared_a, [images_a_shape[0], images_a_shape[1], -1])
+      temp_down_shared_b = tf.reshape(down_shared_b, [images_b_shape[0], images_b_shape[1], -1])
+      shared_all = tf.concat([temp_down_shared_a, temp_down_shared_b], axis=0)
       tcc_loss = tcc.compute_alignment_loss(
           embs=shared_all,
           batch_size=tf.shape(shared_all)[0],
@@ -161,19 +176,17 @@ class Trainer(object):
           + z_recon_cmp + gan_cmp + tcc_cmp + control_cmp)
       control_loss = control_cmp
 
-    dis_models = [self.model.dis_a, self.model.dis_b]
+    dis_models = self.model.get_dis_models()
     dis_variables = [v for model in dis_models for v in model.trainable_variables]
     dis_grads = t.gradient(dis_loss, dis_variables)
-    gen_models = [
-        self.model.encoder_a, self.model.encoder_b,
-        self.model.encoder_shared, self.model.decoder_shared,
-        self.model.decoder_a, self.model.decoder_b]
+    gen_models = self.model.get_gen_models()
     gen_variables = [v for model in gen_models for v in model.trainable_variables]
     gen_grads = t.gradient(gen_loss, gen_variables)
     control_models = [self.controller]
     control_variables = [v for model in control_models for v in model.trainable_variables]
     control_grads = t.gradient(control_loss, control_variables)
 
+    # TODO: ADD FINE-TUNING PROCEDURE
     self.dis_opt.apply_gradients(zip(dis_grads, dis_variables))
     self.gen_opt.apply_gradients(zip(gen_grads, gen_variables))
     self.control_opt.apply_gradients(zip(control_grads, control_variables))
@@ -441,7 +454,8 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
     ]:
       if shared_x is None:
         continue
-      predictions_x = controller(shared_x, training=training)
+      down_x = unit_model.downstream_hidden(shared_x)
+      predictions_x = controller(down_x, training=training)
       actions_x = actions_x.numpy()
       predictions_x = predictions_x.numpy()
       for metric_x in metrics_x:
@@ -490,6 +504,7 @@ def main():
       'decoder_shared': unit_model.decoder_shared,
       'decoder_a': unit_model.decoder_a,
       'decoder_b': unit_model.decoder_b,
+      'downstreamer': unit_model.downstreamer,
       'dis_a': unit_model.dis_a,
       'dis_b': unit_model.dis_b,
       'controller': controller.model,
@@ -499,7 +514,7 @@ def main():
   }
   checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=1)
   try:  # Restore checkpoint
-    checkpoint.restore().assert_existing_objects_matched()
+    checkpoint.restore(config['restore_path']).assert_existing_objects_matched()
   except Exception as e:
     logging.error(e)
   summary_writer = tf.summary.create_file_writer(summaries_dir)

@@ -3,6 +3,7 @@ config:
   image_display_iterations: 250 # How often do you want to display output images during training
   image_save_iterations: 2500 # How often do you want to save output images during training
   test_every_iterations: 1000 # How often do you want to test trained models
+  restore_path: null
   hyperparameters:
     trainer: Trainer
     seed: 30
@@ -16,7 +17,7 @@ config:
       kl_cycle_link_w: 0.1
       z_recon_w: 0.1
       gan_w: 10
-      tcc_w: 100
+      tcc_w: 1.0
       tcc:
         stochastic_matching: true
         normalize_embeddings: true
@@ -42,6 +43,7 @@ config:
       n_dec_front_blk: 3
       res_dropout_ratio: 0.5
       norm_layer: instance_norm
+      fc_layers: [128]
       optimizer:
         lr_schedule_class: ConstantSchedule
         lr: 1e-4
@@ -60,8 +62,8 @@ config:
         beta_1: 0.5
         beta_2: 0.999
     control:
-      n_layer: 3
-      fc_layers: [16]
+      n_layer: 0
+      fc_layers: [128, 32, 8]
       optimizer:
         lr_schedule_class: ConstantSchedule
         lr: 1e-2
@@ -72,6 +74,6 @@ config:
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
     domain_a:
-      dataset_path: episode_1438/loop_empty_patched_reformatted
+      dataset_path: episode_1293
     domain_b:
       dataset_path: logs/duckietown
