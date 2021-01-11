@@ -7,7 +7,8 @@ config:
   hyperparameters:
     trainer: Trainer
     seed: 30
-    iterations: 100000
+    iterations: 10000
+    shuffle_episode_indexes: true
     episode_batch_size: 2
     temporal_batch_size: 32
     loss:
@@ -70,10 +71,10 @@ config:
         method: sgd
   datasets:
     general:
-      datasets_dir: /home/zerogerc/msazanovich/duckietown-data
+      datasets_dir: /home/zerogerc/msazanovich/duckietown-data/aido3
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
     domain_a:
-      dataset_path: episode_1293
+      dataset_path: loop_empty
     domain_b:
-      dataset_path: logs/duckietown
+      dataset_path: duckietown

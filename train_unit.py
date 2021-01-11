@@ -152,29 +152,30 @@ class Trainer(object):
       predictions_ab = self.controller(down_shared_ab, training=training)
       control_loss_ab = self.control_loss_criterion(actions_a, predictions_ab)
 
-      temp_down_shared_a = tf.reshape(down_shared_a, [images_a_shape[0], images_a_shape[1], -1])
-      temp_down_shared_b = tf.reshape(down_shared_b, [images_b_shape[0], images_b_shape[1], -1])
-      shared_all = tf.concat([temp_down_shared_a, temp_down_shared_b], axis=0)
-      tcc_loss = tcc.compute_alignment_loss(
-          embs=shared_all,
-          batch_size=tf.shape(shared_all)[0],
-          steps=None,
-          seq_lens=None,
-          **self.hyperparameters['loss']['tcc'])
-
       ll_direct_link_cmp = self.hyperparameters['loss']['ll_direct_link_w'] * (ll_loss_a + ll_loss_b)
       ll_cycle_link_cmp = self.hyperparameters['loss']['ll_cycle_link_w'] * (ll_loss_aba + ll_loss_bab)
       kl_direct_link_cmp = self.hyperparameters['loss']['kl_direct_link_w'] * (kl_direct_a_loss + kl_direct_b_loss)
       kl_cycle_link_cmp = self.hyperparameters['loss']['kl_cycle_link_w'] * (kl_cycle_ab_loss + kl_cycle_ba_loss)
       z_recon_cmp = self.hyperparameters['loss']['z_recon_w'] * (z_recon_loss_a + z_recon_loss_b)
       gan_cmp = self.hyperparameters['loss']['gan_w'] * (gen_ad_loss_a + gen_ad_loss_b)
-      tcc_cmp = self.hyperparameters['loss']['tcc_w'] * tcc_loss
       control_cmp = self.hyperparameters['loss']['control_w'] * (control_loss_a + control_loss_ab)
-
+      control_loss = control_cmp
       gen_loss = (
           ll_direct_link_cmp + ll_cycle_link_cmp + kl_direct_link_cmp + kl_cycle_link_cmp
-          + z_recon_cmp + gan_cmp + tcc_cmp + control_cmp)
-      control_loss = control_cmp
+          + z_recon_cmp + gan_cmp + control_cmp)
+
+      if self.hyperparameters['loss']['tcc_w']:
+        temp_down_shared_a = tf.reshape(down_shared_a, [images_a_shape[0], images_a_shape[1], -1])
+        temp_down_shared_b = tf.reshape(down_shared_b, [images_b_shape[0], images_b_shape[1], -1])
+        shared_all = tf.concat([temp_down_shared_a, temp_down_shared_b], axis=0)
+        tcc_loss = tcc.compute_alignment_loss(
+            embs=shared_all,
+            batch_size=tf.shape(shared_all)[0],
+            steps=None,
+            seq_lens=None,
+            **self.hyperparameters['loss']['tcc'])
+        tcc_cmp = self.hyperparameters['loss']['tcc_w'] * tcc_loss
+        gen_loss += tcc_cmp
 
     dis_models = self.model.get_dis_models()
     dis_variables = [v for model in dis_models for v in model.trainable_variables]
@@ -212,9 +213,10 @@ class Trainer(object):
         'kl_cycle_link': kl_cycle_link_cmp,
         'z_recon': z_recon_cmp,
         'gan': gan_cmp,
-        'tcc': tcc_cmp,
         'loss': gen_loss,
     }
+    if self.hyperparameters['loss']['tcc_w']:
+      G_loss_dict['tcc'] = tcc_cmp
     C_loss_dict = {
         'control': control_cmp,
         'loss': control_loss,
@@ -279,7 +281,8 @@ def create_image_action_dataset_from_episodes(dataset_path, train_episodes, test
               f'{temporal_batch_size}. Skipping it.')
           continue
         indexes = [index for index in range(bounds[0], bounds[1])]
-        np.random.shuffle(indexes)
+        if hypers.get('shuffle_episode_indexes'):
+          np.random.shuffle(indexes)
         batch_start = 0
         while batch_start < episode_len:
           batch_end = batch_start + temporal_batch_size
