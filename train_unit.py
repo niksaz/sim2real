@@ -164,7 +164,20 @@ class Trainer(object):
           ll_direct_link_cmp + ll_cycle_link_cmp + kl_direct_link_cmp + kl_cycle_link_cmp
           + z_recon_cmp + gan_cmp + control_cmp)
 
-      if self.hyperparameters['loss']['tcc_w']:
+      if self.hyperparameters['loss'].get('triplet_w'):
+        mse_none = tf.keras.losses.MeanSquaredError(reduction=tf.keras.losses.Reduction.NONE)
+        temp_down_shared_a = tf.reshape(down_shared_a, [images_a_shape[0], images_a_shape[1], -1])  # B x T x H
+        temp_down_shared_b = tf.reshape(down_shared_b, [images_b_shape[0], images_b_shape[1], -1])  # B x T x H
+        shared_all = tf.concat([temp_down_shared_a, temp_down_shared_b], axis=0)  # 2B x T x H
+        close_shared_all = tf.roll(shared_all, shift=1, axis=1)
+        other_shared_all = tf.roll(shared_all, shift=1, axis=0)
+        margin = tf.constant(self.hyperparameters['loss']['triplet_margin'])
+        distance_unbound = margin + mse_none(shared_all, close_shared_all) - mse_none(shared_all, other_shared_all)
+        distance_bound = tf.reduce_mean(tf.maximum(tf.zeros_like(distance_unbound), distance_unbound))
+        triplet_cmp = self.hyperparameters['loss']['triplet_w'] * distance_bound
+        gen_loss += triplet_cmp
+
+      if self.hyperparameters['loss'].get('tcc_w'):
         temp_down_shared_a = tf.reshape(down_shared_a, [images_a_shape[0], images_a_shape[1], -1])
         temp_down_shared_b = tf.reshape(down_shared_b, [images_b_shape[0], images_b_shape[1], -1])
         shared_all = tf.concat([temp_down_shared_a, temp_down_shared_b], axis=0)
@@ -215,7 +228,9 @@ class Trainer(object):
         'gan': gan_cmp,
         'loss': gen_loss,
     }
-    if self.hyperparameters['loss']['tcc_w']:
+    if self.hyperparameters['loss'].get('triplet_w'):
+      G_loss_dict['triplet'] = triplet_cmp
+    if self.hyperparameters['loss'].get('tcc_w'):
       G_loss_dict['tcc'] = tcc_cmp
     C_loss_dict = {
         'control': control_cmp,
