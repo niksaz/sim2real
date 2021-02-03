@@ -5,16 +5,16 @@ import unittest
 import time
 
 import configuration
-import train_unit
+import train
 import layers
 
 
-class TrainUnitTest(unittest.TestCase):
+class TrainTest(unittest.TestCase):
   def test_dataset_iteration(self):
     config_path = os.path.join('configs', 'unit', 'duckietown_unit.yaml')
     config = configuration.load_config(config_path)
-    a_train_dataset, a_test_dataset, a_test_length = train_unit.create_image_action_dataset(config, 'domain_a')
-    b_train_dataset, b_test_dataset, b_test_length = train_unit.create_image_action_dataset(config, 'domain_b')
+    a_train_dataset, a_test_dataset, a_test_length = train.create_image_action_dataset(config, 'domain_a')
+    b_train_dataset, b_test_dataset, b_test_length = train.create_image_action_dataset(config, 'domain_b')
 
     for dataset in [a_train_dataset, a_test_dataset, b_train_dataset, b_test_dataset]:
       time_start = time.time()
@@ -31,15 +31,15 @@ class TrainUnitTest(unittest.TestCase):
     config_path = os.path.join('configs', 'unit', 'duckietown_unit.yaml')
     config = configuration.load_config(config_path)
 
-    unit_model = train_unit.UNITModel(config)
+    unit_model = train.UNITModel(config)
     gen_hyperparameters = config['hyperparameters']['gen']
     z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
     control_hyperparameters = config['hyperparameters']['control']
     controller = layers.Controller(z_ch, control_hyperparameters, 2)
-    trainer = train_unit.Trainer(unit_model, controller, config['hyperparameters'])
+    trainer = train.Trainer(unit_model, controller, config['hyperparameters'])
 
-    a_train_dataset, a_test_dataset, a_test_length = train_unit.create_image_action_dataset(config, 'domain_a')
-    b_train_dataset, b_test_dataset, b_test_length = train_unit.create_image_action_dataset(config, 'domain_b')
+    a_train_dataset, a_test_dataset, a_test_length = train.create_image_action_dataset(config, 'domain_a')
+    b_train_dataset, b_test_dataset, b_test_length = train.create_image_action_dataset(config, 'domain_b')
 
     a_dataset_iter = iter(a_train_dataset)
     b_dataset_iter = iter(b_train_dataset)
