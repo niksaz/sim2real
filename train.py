@@ -20,7 +20,7 @@ import optimization
 import utils
 
 
-class UNITModel(object):
+class TranslationModel(object):
   def __init__(self, config):
     gen_hyperparameters = config['hyperparameters']['gen']
     self.encoder_a = layers.Encoder(gen_hyperparameters)
@@ -247,6 +247,40 @@ class Trainer(object):
     optimizer.apply_gradients(zip(grads, variables))
 
 
+def create_models_and_trainer(config) -> Trainer:
+  translation_model = TranslationModel(config)
+  gen_hyperparameters = config['hyperparameters']['gen']
+  z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
+  control_hyperparameters = config['hyperparameters']['control']
+  controller = layers.Controller(z_ch, control_hyperparameters, 2)
+  trainer = Trainer(translation_model, controller, config['hyperparameters'])
+  return trainer
+
+
+def reload_checkpoint(trainer: Trainer, checkpoints_dir: str, save_path=None) -> tf2lib.Checkpoint:
+  checkpoint_dict = {
+      'encoder_a': trainer.model.encoder_a,
+      'encoder_b': trainer.model.encoder_b,
+      'encoder_shared': trainer.model.encoder_shared,
+      'decoder_shared': trainer.model.decoder_shared,
+      'decoder_a': trainer.model.decoder_a,
+      'decoder_b': trainer.model.decoder_b,
+      'downstreamer': trainer.model.downstreamer,
+      'dis_a': trainer.model.dis_a,
+      'dis_b': trainer.model.dis_b,
+      'controller': trainer.controller.model,
+      'gen_opt': trainer.gen_opt,
+      'dis_opt': trainer.dis_opt,
+      'control_opt': trainer.control_opt,
+  }
+  checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=1)
+  try:  # Restore checkpoint
+    checkpoint.restore(save_path).assert_existing_objects_matched()
+  except Exception as e:
+    logging.error(e)
+  return checkpoint
+
+
 def get_sample_image_action_paths(dataset_path, sample):
   image_path = os.path.join(dataset_path, f'{sample}.png')
   assert os.path.exists(image_path)
@@ -411,7 +445,7 @@ def main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_di
       checkpoint.save(iterations)
 
 
-def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_iterations, samples_dir):
+def test_model(model, controller, a_test_dataset, b_test_dataset, max_iterations, samples_dir):
   training = False
   mae_metric_a = metrics.MAEMetric()
   mae_metric_b = metrics.MAEMetric()
@@ -436,18 +470,18 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
     # Inference ops
     G_images = None
     if images_a is not None and images_b is not None:
-      x_aa, x_ba, x_ab, x_bb, shared = unit_model.encode_ab_decode_aabb(images_a, images_b, training=training)
-      x_bab, _ = unit_model.encode_a_decode_b(x_ba, training=training)
-      x_aba, _ = unit_model.encode_b_decode_a(x_ab, training=training)
+      x_aa, x_ba, x_ab, x_bb, shared = model.encode_ab_decode_aabb(images_a, images_b, training=training)
+      x_bab, _ = model.encode_a_decode_b(x_ba, training=training)
+      x_aba, _ = model.encode_b_decode_a(x_ab, training=training)
       G_images = [x_aa, x_ba, x_ab, x_bb, x_aba, x_bab]
       shared_a, shared_b = tf.split(shared, num_or_size_splits=[len(images_a), len(images_b)], axis=0)
     elif images_a is not None:
-      encoded_a = unit_model.encoder_a(images_a, training=training)
-      shared_a = unit_model.encoder_shared(encoded_a, training=training)
+      encoded_a = model.encoder_a(images_a, training=training)
+      shared_a = model.encoder_shared(encoded_a, training=training)
       shared_b = None
     elif images_b is not None:
-      encoded_b = unit_model.encoder_b(images_b, training=training)
-      shared_b = unit_model.encoder_shared(encoded_b, training=training)
+      encoded_b = model.encoder_b(images_b, training=training)
+      shared_b = model.encoder_shared(encoded_b, training=training)
       shared_a = None
     else:
       raise AssertionError('There are no images either from A or B during the test.')
@@ -472,7 +506,7 @@ def test_model(unit_model, controller, a_test_dataset, b_test_dataset, max_itera
     ]:
       if shared_x is None:
         continue
-      down_x = unit_model.downstream_hidden(shared_x)
+      down_x = model.downstream_hidden(shared_x)
       predictions_x = controller(down_x, training=training)
       actions_x = actions_x.numpy()
       predictions_x = predictions_x.numpy()
@@ -504,37 +538,13 @@ def main():
   a_train_dataset, a_test_dataset, a_test_length = create_image_action_dataset(config, 'domain_a')
   b_train_dataset, b_test_dataset, b_test_length = create_image_action_dataset(config, 'domain_b')
 
-  unit_model = UNITModel(config)
-  gen_hyperparameters = config['hyperparameters']['gen']
-  z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
-  control_hyperparameters = config['hyperparameters']['control']
-  controller = layers.Controller(z_ch, control_hyperparameters, 2)
-  trainer = Trainer(unit_model, controller, config['hyperparameters'])
+  trainer = create_models_and_trainer(config)
 
   output_dir, (samples_dir, summaries_dir, checkpoints_dir) = utils.create_output_dirs(
       args.output_dir_base, 'unit', args.tag, ['samples', 'summaries', 'checkpoints'])
   configuration.dump_config(config, os.path.join(output_dir, 'config.yaml'))
 
-  checkpoint_dict = {
-      'encoder_a': unit_model.encoder_a,
-      'encoder_b': unit_model.encoder_b,
-      'encoder_shared': unit_model.encoder_shared,
-      'decoder_shared': unit_model.decoder_shared,
-      'decoder_a': unit_model.decoder_a,
-      'decoder_b': unit_model.decoder_b,
-      'downstreamer': unit_model.downstreamer,
-      'dis_a': unit_model.dis_a,
-      'dis_b': unit_model.dis_b,
-      'controller': controller.model,
-      'gen_opt': trainer.gen_opt,
-      'dis_opt': trainer.dis_opt,
-      'control_opt': trainer.control_opt,
-  }
-  checkpoint = tf2lib.Checkpoint(checkpoint_dict, checkpoints_dir, max_to_keep=1)
-  try:  # Restore checkpoint
-    checkpoint.restore(config['restore_path']).assert_existing_objects_matched()
-  except Exception as e:
-    logging.error(e)
+  checkpoint = reload_checkpoint(trainer, checkpoints_dir, config['restore_path'])
   summary_writer = tf.summary.create_file_writer(summaries_dir)
 
   with summary_writer.as_default():
@@ -543,11 +553,14 @@ def main():
     main_loop(trainer, datasets, test_iterations, config, checkpoint, samples_dir)
 
   if args.summarize:
-    unit_model.encoder_a.model.summary()
-    unit_model.encoder_b.model.summary()
-    unit_model.encoder_shared.model.summary()
-    unit_model.decoder_shared.model.summary()
-    controller.model.summary()
+    trainer.model.encoder_a.model.summary()
+    trainer.model.encoder_b.model.summary()
+    trainer.model.encoder_shared.model.summary()
+    trainer.model.decoder_shared.model.summary()
+    trainer.model.decoder_b.model.summary()
+    trainer.model.decoder_a.model.summary()
+    trainer.model.downstreamer.model.summary()
+    trainer.controller.model.summary()
 
 
 if __name__ == '__main__':

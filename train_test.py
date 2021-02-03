@@ -6,7 +6,6 @@ import time
 
 import configuration
 import train
-import layers
 
 
 class TrainTest(unittest.TestCase):
@@ -31,12 +30,7 @@ class TrainTest(unittest.TestCase):
     config_path = os.path.join('configs', 'unit', 'duckietown_unit.yaml')
     config = configuration.load_config(config_path)
 
-    unit_model = train.UNITModel(config)
-    gen_hyperparameters = config['hyperparameters']['gen']
-    z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
-    control_hyperparameters = config['hyperparameters']['control']
-    controller = layers.Controller(z_ch, control_hyperparameters, 2)
-    trainer = train.Trainer(unit_model, controller, config['hyperparameters'])
+    trainer = train.create_models_and_trainer(config)
 
     a_train_dataset, a_test_dataset, a_test_length = train.create_image_action_dataset(config, 'domain_a')
     b_train_dataset, b_test_dataset, b_test_length = train.create_image_action_dataset(config, 'domain_b')
