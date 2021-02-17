@@ -83,10 +83,6 @@ class Encoder(tf.keras.Model):
     ch = params['ch']
     n_enc_front_blk = params['n_enc_front_blk']
     n_enc_res_blk = params['n_enc_res_blk']
-    n_enc_shared_blk = params['n_enc_shared_blk']
-    n_dec_shared_blk = params['n_dec_shared_blk']
-    n_dec_res_blk = params['n_dec_res_blk']
-    n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
     norm_layer = params['norm_layer']
 
@@ -109,14 +105,9 @@ class Encoder(tf.keras.Model):
 class EncoderShared(tf.keras.Model):
   def __init__(self, params):
     super(EncoderShared, self).__init__()
-    input_dim = params['input_dim']
     ch = params['ch']
     n_enc_front_blk = params['n_enc_front_blk']
-    n_enc_res_blk = params['n_enc_res_blk']
     n_enc_shared_blk = params['n_enc_shared_blk']
-    n_dec_shared_blk = params['n_dec_shared_blk']
-    n_dec_res_blk = params['n_dec_res_blk']
-    n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
     norm_layer = params['norm_layer']
 
@@ -135,14 +126,9 @@ class EncoderShared(tf.keras.Model):
 class DecoderShared(tf.keras.Model):
   def __init__(self, params):
     super(DecoderShared, self).__init__()
-    input_dim = params['input_dim']
     ch = params['ch']
     n_enc_front_blk = params['n_enc_front_blk']
-    n_enc_res_blk = params['n_enc_res_blk']
-    n_enc_shared_blk = params['n_enc_shared_blk']
     n_dec_shared_blk = params['n_dec_shared_blk']
-    n_dec_res_blk = params['n_dec_res_blk']
-    n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
     norm_layer = params['norm_layer']
 
@@ -163,9 +149,6 @@ class Decoder(tf.keras.Model):
     input_dim = params['input_dim']
     ch = params['ch']
     n_enc_front_blk = params['n_enc_front_blk']
-    n_enc_res_blk = params['n_enc_res_blk']
-    n_enc_shared_blk = params['n_enc_shared_blk']
-    n_dec_shared_blk = params['n_dec_shared_blk']
     n_dec_res_blk = params['n_dec_res_blk']
     n_dec_front_blk = params['n_dec_front_blk']
     res_dropout_ratio = params.get('res_dropout_ratio', 0.0)
