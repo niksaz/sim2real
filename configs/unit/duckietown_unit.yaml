@@ -7,7 +7,7 @@ config:
   hyperparameters:
     trainer: Trainer
     seed: 30
-    iterations: 25000
+    iterations: 100000
     shuffle_episode_indexes: true
     episode_batch_size: 2
     temporal_batch_size: 32
@@ -17,10 +17,10 @@ config:
       ll_cycle_link_w: 100
       kl_cycle_link_w: 0.1
       z_recon_w: 0.1
-      triplet_w: 0.0
+      triplet_w: 0.1
       triplet_margin: 1.0
       gan_w: 10
-      tcc_w: 1.0
+      tcc_w: 0.1
       tcc:
         stochastic_matching: true
         normalize_embeddings: true
@@ -36,7 +36,7 @@ config:
       control_w: 1.0
       control: mse
     gen:
-      ch: 64
+      ch: 16
       input_dim: 3
       n_enc_front_blk: 3
       n_enc_res_blk: 3
@@ -54,7 +54,7 @@ config:
         beta_1: 0.5
         beta_2: 0.999
     dis:
-      ch: 64
+      ch: 16
       input_dim: 3
       n_layer: 4
       norm_layer: instance_norm
@@ -73,10 +73,10 @@ config:
         method: sgd
   datasets:
     general:
-      datasets_dir: /home/zerogerc/msazanovich/duckietown-data/aido3
+      datasets_dir: /
       load_size: [32, 64] # height, width
       crop_size: [32, 64] # height, width
     domain_a:
-      dataset_path: loop_empty
+      dataset_path: home/zerogerc/msazanovich/aido3/data/daffy_loop_empty
     domain_b:
-      dataset_path: duckietown
+      dataset_path: home/zerogerc/msazanovich/duckietown-data/aido3/duckietown
