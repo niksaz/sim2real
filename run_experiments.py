@@ -19,7 +19,7 @@ def run_experiment(config, update_params, tag):
 
   generated_config_path = 'configs/unit/generated_duckietown_unit.yaml'
   configuration.dump_config(generated_config, generated_config_path)
-  os.system(f'python train_unit.py {tag} --config_path {generated_config_path}')
+  os.system(f'python train.py {tag} --config_path {generated_config_path} --summarize')
 
 
 def iterations_to_desc(iterations: int) -> str:
@@ -29,40 +29,42 @@ def iterations_to_desc(iterations: int) -> str:
 def main():
   original_config_path = 'configs/unit/duckietown_unit.yaml'
   config = configuration.load_config(original_config_path)
-  iterations = 25000
-  tag_to_update_params = {
-      f'SIM2REAL-SHUFFLE-{iterations_to_desc(iterations)}': {
-          'hyperparameters/shuffle_episode_indexes': True,
-          'hyperparameters/loss/triplet_w': 0.0,
-          'hyperparameters/loss/triplet_margin': 0.0,
-          'hyperparameters/loss/tcc_w': 0.0,
+  iterations = 100000
+  channels = 16
+  tag_to_update_params_items = []
+  for map_label, map_path in [
+      ('DALP', 'home/zerogerc/msazanovich/aido3/data/daffy_loop_empty'),
+      ('DAIS', 'home/zerogerc/msazanovich/aido3/data/daffy_udem1')]:
+    for use_tcc_loss in [True, False]:
+      for use_triplet_loss in [True, False]:
+        if use_tcc_loss:
+          tcc_w = 0.1
+        else:
+          tcc_w = 0.0
+        if use_triplet_loss:
+          triplet_w = 0.1
+          triplet_margin = 1.0
+        else:
+          triplet_w = 0.0
+          triplet_margin = 0.0
+        tag = (f'T46-{map_label}2DUCK-{channels}'
+               f'-TCC-{tcc_w}-TRIPLET-{triplet_w}-MAR-{triplet_margin}-{iterations_to_desc(iterations)}')
+        update_params = {
+          'hyperparameters/loss/tcc_w': tcc_w,
+          'hyperparameters/loss/triplet_w': triplet_w,
+          'hyperparameters/loss/triplet_margin': triplet_margin,
           'hyperparameters/iterations': iterations,
-      },
-      f'SIM2REAL-TRIPLET-0.1-MAR-1.0-SHUFFLE-{iterations_to_desc(iterations)}': {
-          'hyperparameters/shuffle_episode_indexes': True,
-          'hyperparameters/loss/triplet_w': 0.1,
-          'hyperparameters/loss/triplet_margin': 1.0,
-          'hyperparameters/loss/tcc_w': 0.0,
-          'hyperparameters/iterations': iterations,
-      },
-      f'SIM2REAL-TCC-0.1-SHUFFLE-{iterations_to_desc(iterations)}': {
-          'hyperparameters/shuffle_episode_indexes': True,
-          'hyperparameters/loss/triplet_w': 0.0,
-          'hyperparameters/loss/triplet_margin': 0.0,
-          'hyperparameters/loss/tcc_w': 0.1,
-          'hyperparameters/iterations': iterations,
-      },
-      f'SIM2REAL-TCC-0.1-TRIPLET-0.1-MAR-1.0-SHUFFLE-{iterations_to_desc(iterations)}': {
-          'hyperparameters/shuffle_episode_indexes': True,
-          'hyperparameters/loss/triplet_w': 0.1,
-          'hyperparameters/loss/triplet_margin': 1.0,
-          'hyperparameters/loss/tcc_w': 0.1,
-          'hyperparameters/iterations': iterations,
-      },
-  }
-  for _ in itertools.count():
-    for tag, update_params in tag_to_update_params.items():
-      run_experiment(config, update_params, tag)
+          'hyperparameters/gen/ch': channels,
+          'hyperparameters/dis/ch': channels,
+          'datasets/general/datasets_dir': '/',
+          'datasets/domain_a/dataset_path': map_path,
+          'datasets/domain_b/dataset_path': 'home/zerogerc/msazanovich/duckietown-data/aido3/duckietown',
+        }
+        tag_to_update_params_items.append((tag, update_params))
+  for index in itertools.count():
+    item_index = index % len(tag_to_update_params_items)
+    tag, update_params = tag_to_update_params_items[item_index]
+    run_experiment(config, update_params, tag)
 
 
 if __name__ == '__main__':

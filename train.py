@@ -112,10 +112,8 @@ class Trainer(object):
       x_aa, x_ba, x_ab, x_bb, shared = self.model.encode_ab_decode_aabb(images_a, images_b, training=training)
       data_a = tf.concat((images_a, x_ba), axis=0)
       data_b = tf.concat((images_b, x_ab), axis=0)
-      res_a = self.model.dis_a(data_a, training=training)
-      res_b = self.model.dis_b(data_b, training=training)
-      out_a = tf.keras.activations.sigmoid(res_a)
-      out_b = tf.keras.activations.sigmoid(res_b)
+      out_a = self.model.dis_a(data_a, training=training)
+      out_b = self.model.dis_b(data_b, training=training)
       out_true_a, out_fake_a = tf.split(out_a, num_or_size_splits=[len(images_a), len(x_ba)], axis=0)
       out_true_b, out_fake_b = tf.split(out_b, num_or_size_splits=[len(images_b), len(x_ab)], axis=0)
       all1 = tf.ones_like(out_true_a)
@@ -193,12 +191,15 @@ class Trainer(object):
     dis_models = self.model.get_dis_models()
     dis_variables = [v for model in dis_models for v in model.trainable_variables]
     dis_grads = t.gradient(dis_loss, dis_variables)
+    dis_grads, _ = tf.clip_by_global_norm(dis_grads, 1.0)
     gen_models = self.model.get_gen_models()
     gen_variables = [v for model in gen_models for v in model.trainable_variables]
     gen_grads = t.gradient(gen_loss, gen_variables)
+    gen_grads, _ = tf.clip_by_global_norm(gen_grads, 1.0)
     control_models = [self.controller]
     control_variables = [v for model in control_models for v in model.trainable_variables]
     control_grads = t.gradient(control_loss, control_variables)
+    control_grads, _ = tf.clip_by_global_norm(control_grads, 1.0)
 
     # TODO: ADD FINE-TUNING PROCEDURE
     self.dis_opt.apply_gradients(zip(dis_grads, dis_variables))
@@ -249,10 +250,8 @@ class Trainer(object):
 
 def create_models_and_trainer(config) -> Trainer:
   translation_model = TranslationModel(config)
-  gen_hyperparameters = config['hyperparameters']['gen']
-  z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
   control_hyperparameters = config['hyperparameters']['control']
-  controller = layers.Controller(z_ch, control_hyperparameters, 2)
+  controller = layers.Controller(control_hyperparameters, 2)
   trainer = Trainer(translation_model, controller, config['hyperparameters'])
   return trainer
 
@@ -561,6 +560,8 @@ def main():
     trainer.model.decoder_a.model.summary()
     trainer.model.downstreamer.model.summary()
     trainer.controller.model.summary()
+    trainer.model.dis_a.model.summary()
+    trainer.model.dis_b.model.summary()
 
 
 if __name__ == '__main__':
