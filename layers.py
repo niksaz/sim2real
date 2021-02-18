@@ -179,7 +179,7 @@ class Discriminator(tf.keras.Model):
     layers += [self.conv2dblock(ch * 2, kernel_size=5, stride=2, padding=2)]
     layers += [self.conv2dblock(ch * 4, kernel_size=5, stride=2, padding=2)]
     layers += [self.conv2dblock(ch * 8, kernel_size=5, stride=2, padding=2)]
-    layers += [Conv2DPadded(1, kernel_size=2, strides=1, padding=0)]
+    layers += [Conv2DPadded(1, kernel_size=(2, 4), strides=1, padding=0)]
     layers += [tf.keras.layers.Activation(tf.keras.activations.sigmoid)]
     self.model = tf.keras.Sequential(layers=layers)
 
