@@ -2,6 +2,7 @@
 
 import glob
 import os
+import fnmatch
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,11 +32,12 @@ def get_metric_from_experiment_logs(experiment_path, metric_tag):
   return np.array(metric_values)
 
 
-def build_plot_for_metric(metric_tag, exp_patterns):
+def build_plot_for_metric(metric_tag, exp_patterns, exp_names):
   exps_dir = os.path.join('output', 'unit')
   pattern_to_exp_metric_measurements = []
   for exp_pattern in exp_patterns:
-    exp_paths = glob.glob(os.path.join(exps_dir, exp_pattern))
+    matched_exp_names = fnmatch.filter(exp_names, exp_pattern)
+    exp_paths = [os.path.join(exps_dir, matched_exp_name) for matched_exp_name in matched_exp_names]
     exp_metric_measurements = []
     for exp_path in exp_paths:
       metric_values = get_metric_from_experiment_logs(exp_path, metric_tag=metric_tag)
@@ -77,6 +79,6 @@ def build_plot_for_metric(metric_tag, exp_patterns):
   plt.show()
 
 
-def build_plots_for_metrics(metric_tags, exp_pattern):
+def build_plots_for_metrics(metric_tags, exp_pattern, exp_names):
   for metric_tag in metric_tags:
-    build_plot_for_metric(metric_tag, exp_pattern)
+    build_plot_for_metric(metric_tag, exp_pattern, exp_names)
