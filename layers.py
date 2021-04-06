@@ -187,6 +187,47 @@ class Discriminator(tf.keras.Model):
     return self.model(inputs, **kwargs)
 
 
+def DiscriminatorConv2dBlock(n_out, kernel_size, stride, padding):
+  layers = [
+    Conv2DPadded(n_out, kernel_size=kernel_size, strides=1, padding=padding),
+    tf.keras.layers.ReLU(),
+    tf.keras.layers.MaxPool2D(pool_size=stride),
+  ]
+  return tf.keras.Sequential(layers=layers)
+
+
+class DiscriminatorHead(tf.keras.Model):
+  def __init__(self, params):
+    super(DiscriminatorHead, self).__init__()
+    ch = params['ch']
+    layers = []
+    layers.append(DiscriminatorConv2dBlock(ch, kernel_size=5, stride=2, padding=2))
+    layers.append(tf.keras.layers.Dropout(0.1))
+    self.model = tf.keras.Sequential(layers=layers)
+
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
+
+
+class DiscriminatorShared(tf.keras.Model):
+  def __init__(self, params):
+    super(DiscriminatorShared, self).__init__()
+    ch = params['ch']
+    layers = []
+    layers.append(DiscriminatorConv2dBlock(ch * 2, kernel_size=5, stride=2, padding=2))
+    layers.append(tf.keras.layers.Dropout(0.3))
+    layers.append(DiscriminatorConv2dBlock(ch * 4, kernel_size=5, stride=2, padding=2))
+    layers.append(tf.keras.layers.Dropout(0.5))
+    layers.append(DiscriminatorConv2dBlock(ch * 8, kernel_size=5, stride=2, padding=2))
+    layers.append(tf.keras.layers.Dropout(0.5))
+    layers.append(Conv2DPadded(1, kernel_size=(2, 4), strides=1, padding=0))
+    layers.append(tf.keras.layers.Activation(tf.keras.activations.sigmoid))
+    self.model = tf.keras.Sequential(layers=layers)
+
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
+
+
 class Controller(tf.keras.Model):
   def __init__(self, control_hyperparameters, output_dim):
     super(Controller, self).__init__()
