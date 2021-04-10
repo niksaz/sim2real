@@ -23,13 +23,13 @@ import utils
 class TranslationModel(object):
   def __init__(self, config):
     gen_hyperparameters = config['hyperparameters']['gen']
-    self.encoder_a = layers.Encoder(gen_hyperparameters)
-    self.encoder_b = layers.Encoder(gen_hyperparameters)
-    self.encoder_shared = layers.EncoderShared(gen_hyperparameters)
+    self.encoder_a = layers.T46Encoder(gen_hyperparameters)
+    self.encoder_b = layers.T46Encoder(gen_hyperparameters)
+    self.encoder_shared = layers.T46EncoderShared(gen_hyperparameters)
     self.downstreamer = layers.Downstreamer(gen_hyperparameters)
-    self.decoder_shared = layers.DecoderShared(gen_hyperparameters)
-    self.decoder_a = layers.Decoder(gen_hyperparameters)
-    self.decoder_b = layers.Decoder(gen_hyperparameters)
+    self.decoder_shared = layers.T46DecoderShared(gen_hyperparameters)
+    self.decoder_a = layers.T46Decoder(gen_hyperparameters)
+    self.decoder_b = layers.T46Decoder(gen_hyperparameters)
 
     dis_hyperparameters = config['hyperparameters']['dis']
     self.dis_a = layers.Discriminator(dis_hyperparameters)
