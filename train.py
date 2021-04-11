@@ -23,13 +23,13 @@ import utils
 class TranslationModel(object):
   def __init__(self, config):
     gen_hyperparameters = config['hyperparameters']['gen']
-    self.encoder_a = layers.T46Encoder(gen_hyperparameters)
-    self.encoder_b = layers.T46Encoder(gen_hyperparameters)
-    self.encoder_shared = layers.T46EncoderShared(gen_hyperparameters)
+    self.encoder_a = layers.Encoder(gen_hyperparameters)
+    self.encoder_b = layers.Encoder(gen_hyperparameters)
+    self.encoder_shared = layers.EncoderShared(gen_hyperparameters)
     self.downstreamer = layers.Downstreamer(gen_hyperparameters)
-    self.decoder_shared = layers.T46DecoderShared(gen_hyperparameters)
-    self.decoder_a = layers.T46Decoder(gen_hyperparameters)
-    self.decoder_b = layers.T46Decoder(gen_hyperparameters)
+    self.decoder_shared = layers.DecoderShared(gen_hyperparameters)
+    self.decoder_a = layers.Decoder(gen_hyperparameters)
+    self.decoder_b = layers.Decoder(gen_hyperparameters)
 
     dis_hyperparameters = config['hyperparameters']['dis']
     self.dis_a = layers.Discriminator(dis_hyperparameters)
@@ -250,8 +250,10 @@ class Trainer(object):
 
 def create_models_and_trainer(config) -> Trainer:
   translation_model = TranslationModel(config)
+  gen_hyperparameters = config['hyperparameters']['gen']
+  z_ch = gen_hyperparameters['ch'] * 2 ** (gen_hyperparameters['n_enc_front_blk'] - 1)
   control_hyperparameters = config['hyperparameters']['control']
-  controller = layers.Controller(control_hyperparameters, 2)
+  controller = layers.Controller(z_ch, control_hyperparameters, 2)
   trainer = Trainer(translation_model, controller, config['hyperparameters'])
   return trainer
 
