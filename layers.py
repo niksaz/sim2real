@@ -160,26 +160,6 @@ class Decoder(tf.keras.Model):
     return self.model(inputs, **kwargs)
 
 
-class Downstreamer(tf.keras.Model):
-  def __init__(self, params):
-    super(Downstreamer, self).__init__()
-    layers = []
-    layers.append(tf.keras.layers.GlobalMaxPool2D())  # B x C
-    for fc_layer in params['fc_layers']:
-      # https://github.com/google-research/google-research/blob/084c18934c353207662aba0db6db52850029faf2/tcc/models.py#L50
-      # layers.append(get_norm_layer('batch_norm'))  # B x FC
-      # layers.append(tf.keras.layers.Dense(fc_layer))  # B x FC
-      # layers.append(tf.keras.layers.ReLU())  # B x FC
-      # AIDO3
-      layers.append(get_norm_layer('batch_norm'))
-      layers.append(tf.keras.layers.ReLU())
-      layers.append(tf.keras.layers.Dense(fc_layer))
-    self.model = tf.keras.Sequential(layers)
-
-  def __call__(self, inputs, **kwargs):
-    return self.model(inputs, **kwargs)
-
-
 class Discriminator(tf.keras.Model):
   def __init__(self, params):
     super(Discriminator, self).__init__()
@@ -202,18 +182,38 @@ class Discriminator(tf.keras.Model):
     return self.model(inputs, **kwargs)
 
 
+class Downstreamer(tf.keras.Model):
+  def __init__(self, params):
+    super(Downstreamer, self).__init__()
+    layers = []
+    layers.append(tf.keras.layers.GlobalMaxPool2D())  # B x C
+    for fc_layer in params['fc_layers']:
+      # https://github.com/google-research/google-research/blob/084c18934c353207662aba0db6db52850029faf2/tcc/models.py#L50
+      # layers.append(get_norm_layer('batch_norm'))  # B x FC
+      # layers.append(tf.keras.layers.Dense(fc_layer))  # B x FC
+      # layers.append(tf.keras.layers.ReLU())  # B x FC
+      # AIDO3
+      layers.append(get_norm_layer('batch_norm'))
+      layers.append(tf.keras.layers.LeakyReLU(alpha=0.01))
+      layers.append(tf.keras.layers.Dense(fc_layer))
+    self.model = tf.keras.Sequential(layers)
+
+  def __call__(self, inputs, **kwargs):
+    return self.model(inputs, **kwargs)
+
+
 class Controller(tf.keras.Model):
   def __init__(self, input_dim, control_hyperparameters, output_dim):
     super(Controller, self).__init__()
     layers = []
     fc_layers_with_output = control_hyperparameters['fc_layers'] + [output_dim]
-    for fc_layer in fc_layers_with_output:
+    for fc_layer_index, fc_layer in enumerate(fc_layers_with_output):
       # AIDO3
       # TODO: Think about the order (should be the same in Downstreamer)>
       layers.append(get_norm_layer('batch_norm'))
-      layers.append(tf.keras.layers.ReLU())
+      layers.append(tf.keras.layers.LeakyReLU(alpha=0.01))
+      layers.append(tf.keras.layers.Dropout(rate=0.1))
       layers.append(tf.keras.layers.Dense(fc_layer))
-      # TODO: Add dropout.
     layers.append(tf.keras.layers.Activation('tanh'))
     self.model = tf.keras.Sequential(layers=layers)
 
